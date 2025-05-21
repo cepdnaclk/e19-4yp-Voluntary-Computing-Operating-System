@@ -1,0 +1,24 @@
+Name :
+Task :
+Type :
+
+
+initialize communication channels (UDP broadcast + secure TCP/WebSocket)
+
+on CONTROLLER side:
+    broadcast RECRUIT messages over local network
+    handle incoming JOIN messages from workers
+    send serialized tasks and await results
+    verify response integrity and update scheduler
+
+on WORKER side:
+    listen for RECRUIT broadcasts
+    establish secure channel with requesting controller
+    accept task, execute, and return result
+
+ensure all messages are:
+    signed or encrypted
+    serialized (e.g., using Protobuf or JSON)
+    retried on failure (with backoff)
+
+log communication events for audit/debug

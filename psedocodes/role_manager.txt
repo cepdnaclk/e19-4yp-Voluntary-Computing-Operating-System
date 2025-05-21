@@ -1,3 +1,4 @@
+Name : Role manager
 Type : Kernel module
 Task : Monitoring system metrics and trigger the switching between controller or worker.
 

@@ -1,0 +1,22 @@
+Name :
+Task :
+Type :
+
+initialize scheduler
+
+on task submission:
+    add to task queue with metadata
+    mark status as PENDING
+
+on worker availability:
+    dequeue task based on priority
+    assign task to selected worker
+    update task status to ASSIGNED
+
+on result received:
+    validate and store result
+    update task status to COMPLETED
+
+on worker failure or timeout:
+    reassign task from failed worker
+    update task status to REASSIGNED

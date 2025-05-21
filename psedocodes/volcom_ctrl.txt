@@ -1,0 +1,24 @@
+Name : Voluntary Compute Controller module
+Task : Activated when the device becomes a controller. Manages task queueing, worker recruitment, and result aggregation.
+Type : Userspace daemon
+
+initialize controller daemon
+
+while system is in CONTROLLER mode:
+    monitor local task queue
+    if new tasks arrive:
+        package and serialize tasks
+        broadcast RECRUIT request to local network
+    
+    for each incoming WORKER response:
+        assess worker capacity and availability
+        assign task(s) and track assignment
+
+    periodically:
+        receive results from workers
+        validate and aggregate results
+        reassign tasks if timeout or failure
+
+    if system load drops:
+        notify all workers of shutdown
+        switch to IDLE mode

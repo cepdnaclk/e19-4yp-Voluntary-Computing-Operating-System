@@ -1,0 +1,20 @@
+Name :
+Task : Executes tasks inside a secure sandbox using Linux namespaces, cgroups, and AppArmor/seccomp policies.
+Type : Kernel
+
+on task execution request:
+    create sandbox container or namespace
+    enforce CPU, memory, and network limits
+    drop unnecessary privileges (run as low-permission user)
+    mount temporary task directory
+
+    start task process in sandbox
+    monitor execution for abnormal behavior
+
+    if execution completes:
+        capture output and logs
+        destroy sandbox environment
+        return results
+
+    if execution fails:
+        log error and clean up environment

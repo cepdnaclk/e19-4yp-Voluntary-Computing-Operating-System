@@ -1,0 +1,22 @@
+Name : Worker
+Task : Activated when the device acts as a worker. Accepts tasks, runs them in sandbox, and returns results.
+Type : Userspace
+
+
+initialize worker daemon
+
+while system is in IDLE mode:
+    listen for RECRUIT requests from controllers
+
+    if RECRUIT received and resources available:
+        respond to controller with capacity info
+        switch to WORKER mode
+
+while system is in WORKER mode:
+    receive and deserialize task
+    execute task in sandboxed environment
+    collect result and send back to controller
+
+    monitor own system load
+    if local workload increases:
+        gracefully notify controller and return to IDLE
