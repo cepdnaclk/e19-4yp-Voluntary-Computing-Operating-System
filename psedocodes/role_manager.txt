@@ -1,0 +1,22 @@
+Type : Kernel module
+Task : Monitoring system metrics and trigger the switching between controller or worker.
+
+
+role_manager:
+  Initialize thresholds:
+    CPU_HIGH_THRESHOLD = 85%
+    CPU_LOW_THRESHOLD = 30%
+    CHECK_INTERVAL = 10s
+
+  While running:
+    cpu_usage = get_current_cpu_usage()
+    net_request = check_for_recruitment_signal()
+
+    If cpu_usage > CPU_HIGH_THRESHOLD:
+      become_controller()
+    Else if cpu_usage < CPU_LOW_THRESHOLD and net_request == "recruit":
+      become_worker()
+    Else:
+      remain_idle()
+
+    sleep(CHECK_INTERVAL)
