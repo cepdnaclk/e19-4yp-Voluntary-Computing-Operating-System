@@ -13,9 +13,9 @@ title: Designing a Kernel-Level Framework for Personal Voluntary Computing in Lo
 
 #### Team
 
-- e19436, G.T.G. Wickramasingha, [email](e19436@eng.pdn.ac.lk)
-- e19443, K.G.D.T. Wijayawardana, [email](e19443@eng.pdn.ac.lk)
-- e19505, S.P.M. Witharana, [email](e19505@eng.pdn.ac.lk)
+- e19436, G.T.G. Wickramasingha, [email](mailto:e19436@eng.pdn.ac.lk)
+- e19443, K.G.D.T. Wijayawardana, [email](mailto:e19443@eng.pdn.ac.lk)
+- e19505, S.P.M. Witharana, [email](mailto:e19505@eng.pdn.ac.lk)
 
 #### Supervisors
 
