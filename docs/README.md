@@ -42,7 +42,7 @@ This is a sample image, to show how to add images to your page. To learn more op
 
 
 ## Abstract
-
+Voluntary computing has emerged as a transformative paradigm, leveraging idle computational resources from personal devices to tackle complex problems. This research proposal advocates for kernel-level architectural innovations to address the limitations of current WebRTC-based personal voluntary computing systems. By integrating virtualization, intelligent task scheduling, and fault tolerance mechanisms directly into the Linux kernel, we aim to unlock unprecedented performance, security, and reliability for ad-hoc distributed computing networks. Our approach seeks to democratize access to exascale computational capabilities while ensuring robust resource isolation and efficient process migration across heterogeneous devices.
 ## Related works
 
 ## Methodology
