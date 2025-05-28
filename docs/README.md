@@ -3,24 +3,23 @@ layout: home
 permalink: index.html
 
 # Please update this with your repository name and title
-repository-name: eYY-4yp-project-template
-title:
+repository-name: e19-4yp-Voluntary-Computing-Operating-System
+title: Designing a Kernel-Level Framework for Personal Voluntary Computing in Local Networks
 ---
 
 [comment]: # "This is the standard layout for the project, but you can clean this and use your own template"
 
-# Project Title
+# Designing a Kernel-Level Framework for Personal Voluntary Computing in Local Networks
 
 #### Team
 
-- eNumber, Name, [email](mailto:name@email.com)
-- eNumber, Name, [email](mailto:name@email.com)
-- eNumber, Name, [email](mailto:name@email.com)
+- e19436, G.T.G. Wickramasingha, [email](mailto:e19436@eng.pdn.ac.lk)
+- e19443, K.G.D.T. Wijayawardana, [email](mailto:e19443@eng.pdn.ac.lk)
+- e19505, S.P.M. Witharana, [email](mailto:e19505@eng.pdn.ac.lk)
 
 #### Supervisors
 
-- Name, [email](mailto:name@eng.pdn.ac.lk)
-- Name, [email](mailto:name@eng.pdn.ac.lk)
+- Prof. Manjula Sandirigama, [email](mailto:manjula.sandirigama@eng.pdn.ac.lk)
 
 #### Table of content
 
@@ -68,8 +67,8 @@ This is a sample image, to show how to add images to your page. To learn more op
 
 [//]: # ( NOTE: EDIT THIS LINKS WITH YOUR REPO DETAILS )
 
-- [Project Repository](https://github.com/cepdnaclk/repository-name)
-- [Project Page](https://cepdnaclk.github.io/repository-name)
+- [Project Repository](https://github.com/cepdnaclk/e19-4yp-Voluntary-Computing-Operating-System)
+- [Project Page](https://cepdnaclk.github.io/e19-4yp-Voluntary-Computing-Operating-System)
 - [Department of Computer Engineering](http://www.ce.pdn.ac.lk/)
 - [University of Peradeniya](https://eng.pdn.ac.lk/)
 
