@@ -1,4 +1,4 @@
-obj-m += hello-3.o
+obj-m += hello-4.o
 
 PWD := $(CURDIR)
 
