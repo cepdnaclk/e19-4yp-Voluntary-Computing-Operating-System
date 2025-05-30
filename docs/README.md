@@ -13,13 +13,13 @@ title: Designing a Kernel-Level Framework for Personal Voluntary Computing in Lo
 
 #### Team
 
-- e19436, G.T.G. Wickramasingha, [email](mailto:e19436@eng.pdn.ac.lk)
-- e19443, K.G.D.T. Wijayawardana, [email](mailto:e19443@eng.pdn.ac.lk)
-- e19505, S.P.M. Witharana, [email](mailto:e19505@eng.pdn.ac.lk)
+-   e19436, G.T.G. Wickramasingha, [email](mailto:e19436@eng.pdn.ac.lk)
+-   e19443, K.G.D.T. Wijayawardana, [email](mailto:e19443@eng.pdn.ac.lk)
+-   e19505, S.P.M. Witharana, [email](mailto:e19505@eng.pdn.ac.lk)
 
 #### Supervisors
 
-- Prof. Manjula Sandirigama, [email](manjula.sandirigama@eng.pdn.ac.lk)
+-   Prof. Manjula Sandirigama, [email](mailto:manjula.sandirigama@eng.pdn.ac.lk)
 
 #### Table of content
 
@@ -34,18 +34,22 @@ title: Designing a Kernel-Level Framework for Personal Voluntary Computing in Lo
 
 ---
 
-<!-- 
+<!--
 DELETE THIS SAMPLE before publishing to GitHub Pages !!!
 This is a sample image, to show how to add images to your page. To learn more options, please refer [this](https://projects.ce.pdn.ac.lk/docs/faq/how-to-add-an-image/)
-![Sample Image](./images/sample.png) 
+![Sample Image](./images/sample.png)
 -->
 
-
 ## Abstract
+
 Voluntary computing has emerged as a transformative paradigm, leveraging idle computational resources from personal devices to tackle complex problems. This research proposal advocates for kernel-level architectural innovations to address the limitations of current WebRTC-based personal voluntary computing systems. By integrating virtualization, intelligent task scheduling, and fault tolerance mechanisms directly into the Linux kernel, we aim to unlock unprecedented performance, security, and reliability for ad-hoc distributed computing networks. Our approach seeks to democratize access to exascale computational capabilities while ensuring robust resource isolation and efficient process migration across heterogeneous devices.
+
 ## Related works
+
 Several projects have explored voluntary computing at the user level, such as BOINC and Pando. BOINC focuses on large-scale scientific volunteer computing using centralized scheduling, while Pando enables ad-hoc task distribution via browser-based WebRTC. However, these systems face limitations in terms of performance overhead, scalability, and user control due to their reliance on user-space tools and protocols. Our approach builds on the motivation of these systems but distinguishes itself by embedding voluntary computing capabilities directly into the OS kernel for improved responsiveness, system-level coordination, and resource isolation.
+
 ## Methodology
+
 Our system enables dynamic role assignment, where any device can become a controller (task dispatcher) or worker (resource contributor) based on its current workload. The core components include:
 
 Role Manager – Determines the device's role at runtime.
@@ -61,7 +65,9 @@ Communication Module – Uses lightweight, secure transport protocols for peer d
 Security Layer – Enforces access control, authentication, and encryption at the kernel level.
 
 Kernel modules interact with user-space utilities to provide a seamless interface for task submission, control, and monitoring. Container-based virtualization (LXC or namespaces with cgroups) is used to isolate worker tasks.
+
 ## Experiment Setup and Implementation
+
 To evaluate the effectiveness of the proposed kernel-level voluntary computing system, we plan the following setup:
 
 Base OS: We will select and modify a lightweight Linux distribution (e.g., Alpine or Tiny Core) to incorporate the proposed voluntary computing modules.
@@ -73,11 +79,13 @@ Task Benchmark: We intend to use simple yet representative distributed computing
 Measurement Tools: Custom monitoring utilities will be developed to log key performance metrics such as CPU usage, task completion time, bandwidth consumption, and task migration behavior.
 
 Evaluation Criteria: The system will be evaluated based on its resource utilization efficiency, ability to handle node churn and failures, scalability under increasing workloads, and impact on the host system’s responsiveness.
+
 ## Results and Analysis
 
 ## Conclusion
 
 ## Publications
+
 [//]: # "Note: Uncomment each once you uploaded the files to the repository"
 
 <!-- 1. [Semester 7 report](./) -->
@@ -86,15 +94,14 @@ Evaluation Criteria: The system will be evaluated based on its resource utilizat
 <!-- 4. [Semester 8 slides](./) -->
 <!-- 5. Author 1, Author 2 and Author 3 "Research paper title" (2021). [PDF](./). -->
 
-
 ## Links
 
-[//]: # ( NOTE: EDIT THIS LINKS WITH YOUR REPO DETAILS )
+[//]: # " NOTE: EDIT THIS LINKS WITH YOUR REPO DETAILS "
 
-- [Project Repository](https://github.com/cepdnaclk/e19-4yp-Voluntary-Computing-Operating-System)
-- [Project Page](https://cepdnaclk.github.io/e19-4yp-Voluntary-Computing-Operating-System)
-- [Department of Computer Engineering](http://www.ce.pdn.ac.lk/)
-- [University of Peradeniya](https://eng.pdn.ac.lk/)
+-   [Project Repository](https://github.com/cepdnaclk/e19-4yp-Voluntary-Computing-Operating-System)
+-   [Project Page](https://cepdnaclk.github.io/e19-4yp-Voluntary-Computing-Operating-System)
+-   [Department of Computer Engineering](http://www.ce.pdn.ac.lk/)
+-   [University of Peradeniya](https://eng.pdn.ac.lk/)
 
 [//]: # "Please refer this to learn more about Markdown syntax"
 [//]: # "https://github.com/adam-p/markdown-here/wiki/Markdown-Cheatsheet"
