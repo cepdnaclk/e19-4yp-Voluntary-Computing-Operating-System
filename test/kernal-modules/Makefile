@@ -1,4 +1,4 @@
-obj-m += hello-4.o
+obj-m += chardev.o
 
 PWD := $(CURDIR)
 
