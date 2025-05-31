@@ -1,4 +1,4 @@
-obj-m += chardev.o
+obj-m += chardev.o task_scheduler.o
 
 PWD := $(CURDIR)
 
