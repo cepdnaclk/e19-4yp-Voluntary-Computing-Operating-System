@@ -24,12 +24,18 @@ static LIST_HEAD(task_list);
 
 static struct device_info devices[MAX_DEVICES];
 
+// Simulate load for a single device
+static void simulate_single_device(int i) {
+    devices[i].id = i;
+    get_random_bytes(&devices[i].load_percent, sizeof(int));
+    devices[i].load_percent = devices[i].load_percent % 101; 
+}
+
+// Simulate random load for each device
 static void simulate_device_status(void) {
     int i;
     for (i = 0; i < MAX_DEVICES; i++) {
-        devices[i].id = i;
-        get_random_bytes(&devices[i].load_percent, sizeof(int));
-        devices[i].load_percent = devices[i].load_percent % 101; // 0 to 100
+        simulate_single_device(i);
         printk(KERN_INFO "Device %d: Load = %d%%\n", i, devices[i].load_percent);
     }
 }
