@@ -3,22 +3,39 @@ Task :
 Type :
 
 
-initialize communication channels (UDP broadcast + secure TCP/WebSocket)
+Module: CommunicationManager
 
-on CONTROLLER side:
-    broadcast RECRUIT messages over local network
-    handle incoming JOIN messages from workers
-    send serialized tasks and await results
-    verify response integrity and update scheduler
+Initialize():
+    Start UDP listener for discovery broadcasts
+    Start TCP listener for control and task messages
 
-on WORKER side:
-    listen for RECRUIT broadcasts
-    establish secure channel with requesting controller
-    accept task, execute, and return result
+BroadcastPresence():
+    Periodically send broadcast UDP messages with device info and role
 
-ensure all messages are:
-    signed or encrypted
-    serialized (e.g., using Protobuf or JSON)
-    retried on failure (with backoff)
+DiscoverPeers():
+    On receiving a broadcast:
+        If peer not in known list:
+            Add to known peers
+            Send handshake message
 
-log communication events for audit/debug
+HandleIncomingTCP():
+    On receiving TCP message:
+        If message.type == HANDSHAKE:
+            Respond with device capabilities
+        If message.type == TASK_ASSIGNMENT:
+            Forward task to TaskExecutor
+        If message.type == HEARTBEAT:
+            Update peer status
+        If message.type == RESULT:
+            Forward result to Controller
+
+SendMessage(to, message):
+    Open TCP connection to peer
+    Serialize message (e.g., JSON)
+    Send and close connection
+
+StartHeartbeat():
+    Periodically send heartbeat messages to all known peers
+
+Shutdown():
+    Close all sockets and cleanup
