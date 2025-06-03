@@ -1,4 +1,4 @@
-obj-m += procfs3.o
+obj-m += chardev2.o
 
 PWD := $(CURDIR)
 
