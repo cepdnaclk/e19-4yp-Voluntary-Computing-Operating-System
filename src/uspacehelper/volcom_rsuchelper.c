@@ -12,34 +12,36 @@
 struct task_config {
     char task_name[TASK_NAME_LEN];
     int memory_limit_mb;
-    int cpu_share; // optional
+    int cpu_share;
+    pid_t pid; // Required for kernel to assign to cgroup
 };
+
 
 #define IOCTL_ALLOCATE_TASK _IOW('k', 1, struct task_config)
 
-void run_node_in_cgroup(const char *task_name, const char *script_path) {
-    char cgroup_procs_path[256];
-    snprintf(cgroup_procs_path, sizeof(cgroup_procs_path),
-             "/sys/fs/cgroup/resgroup/%s/cgroup.procs", task_name);
-
+void run_node_in_cgroup(int fd, const char *task_name, const char *script_path, int mem_limit, int cpu_share) {
     pid_t pid = fork();
     if (pid == 0) {
-        // Child: launch Node.js process
-        char pid_str[16];
-        snprintf(pid_str, sizeof(pid_str), "%d", getpid());
-
-        FILE *f = fopen(cgroup_procs_path, "w");
-        if (!f) {
-            perror("Failed to write to cgroup.procs");
-            exit(1);
-        }
-        fprintf(f, "%s", pid_str);
-        fclose(f);
-
+        // Child will be assigned to cgroup by parent, then exec Node.js
+        pause();  // Wait until parent puts us in the cgroup
         execlp("node", "node", script_path, NULL);
         perror("execlp failed");
         exit(1);
     } else if (pid > 0) {
+        struct task_config config = {0};
+        strncpy(config.task_name, task_name, TASK_NAME_LEN - 1);
+        config.memory_limit_mb = mem_limit;
+        config.cpu_share = cpu_share;
+        config.pid = pid;
+
+        if (ioctl(fd, IOCTL_ALLOCATE_TASK, &config) < 0) {
+            perror("ioctl failed");
+            kill(pid, SIGKILL);
+            return;
+        }
+
+        printf("Cgroup for task '%s' created, PID %d assigned\n", task_name, pid);
+        kill(pid, SIGCONT); // Resume child after cgroup assignment
         waitpid(pid, NULL, 0);  // Wait for Node.js to complete
     } else {
         perror("fork failed");
@@ -55,6 +57,7 @@ int main(int argc, char *argv[]) {
     const char *task_name = argv[1];
     int mem_limit = atoi(argv[2]);
     const char *script_path = argv[3];
+    int cpu_share = 20000; // 20%, for example
 
     int fd = open(DEVICE_PATH, O_RDWR);
     if (fd < 0) {
@@ -62,18 +65,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    struct task_config config = {0};
-    strncpy(config.task_name, task_name, TASK_NAME_LEN - 1);
-    config.memory_limit_mb = mem_limit;
-
-    if (ioctl(fd, IOCTL_ALLOCATE_TASK, &config) < 0) {
-        perror("ioctl failed");
-        close(fd);
-        return 1;
-    }
-
-    printf("Cgroup for task '%s' created with %dMB memory\n", task_name, mem_limit);
-    run_node_in_cgroup(task_name, script_path);
+    run_node_in_cgroup(fd, task_name, script_path, mem_limit, cpu_share);
 
     close(fd);
     return 0;

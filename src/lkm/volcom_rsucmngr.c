@@ -1,7 +1,7 @@
 /*
- * Kernel Module with Cgroup Creation and Limit Setting
- * - Allocates memory/cpu to tasks based on ioctl input
- * - Creates and configures cgroups under /sys/fs/cgroup
+ * Kernel Module with Cgroup v2 Creation and Limit Setting
+ * - Allocates memory and CPU to tasks based on ioctl input
+ * - Attaches processes to new cgroups under /sys/fs/cgroup/resgroup
  */
 
 #include <linux/init.h>
@@ -14,8 +14,6 @@
 #include <linux/kobject.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
-#include <linux/kernfs.h>
-#include <linux/cred.h>
 #include <linux/sched.h>
 #include <linux/cgroup.h>
 #include <linux/namei.h>
@@ -34,7 +32,8 @@ MODULE_DESCRIPTION("Kernel module for resource allocation using cgroups");
 struct task_config {
     char task_name[TASK_NAME_LEN];
     int memory_limit_mb;
-    int cpu_share; // optional for now
+    int cpu_share; // In microseconds per 100ms (e.g. 20000 = 20%)
+    pid_t pid; // Process ID to assign
 };
 
 #define IOCTL_ALLOCATE_TASK _IOW('k', 1, struct task_config)
@@ -51,22 +50,19 @@ static struct kobj_attribute path_attr = __ATTR_RO(path);
 // Helper to write to cgroup files
 static int write_cgroup_file(const char *path, const char *filename, const char *value) {
     struct file *file;
-    mm_segment_t old_fs;
     char fullpath[256];
     ssize_t written;
+    loff_t pos = 0;
 
     snprintf(fullpath, sizeof(fullpath), "%s/%s", path, filename);
-    old_fs = get_fs();
-    set_fs(KERNEL_DS);
     file = filp_open(fullpath, O_WRONLY | O_CREAT, 0644);
     if (IS_ERR(file)) {
-        set_fs(old_fs);
         pr_err("[resman] Failed to open file: %s\n", fullpath);
         return PTR_ERR(file);
     }
-    written = kernel_write(file, value, strlen(value), &file->f_pos);
+
+    written = kernel_write(file, value, strlen(value), &pos);
     filp_close(file, NULL);
-    set_fs(old_fs);
     return (written > 0) ? 0 : -EIO;
 }
 
@@ -74,6 +70,8 @@ static long resman_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     struct task_config config;
     char task_path[256];
     char mem_limit[32];
+    char cpu_limit[32];
+    char pid_str[16];
     int ret;
 
     if (cmd != IOCTL_ALLOCATE_TASK)
@@ -84,14 +82,14 @@ static long resman_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
     snprintf(task_path, sizeof(task_path), "%s/%s", cgroup_base_path, config.task_name);
 
-    // Create directory
-    ret = sys_mkdir(task_path, 0755);
-    if (ret < 0 && ret != -EEXIST) {
-        pr_err("[resman] Failed to create cgroup directory: %s\n", task_path);
-        return ret;
+    // Check if the directory exists
+    ret = kern_path(task_path, LOOKUP_DIRECTORY, NULL);
+    if (ret != 0) {
+        pr_err("[resman] Cgroup directory does not exist: %s\n", task_path);
+        return -ENOENT;
     }
 
-    // Set memory limit
+    // Set memory limit in megabytes
     snprintf(mem_limit, sizeof(mem_limit), "%dM", config.memory_limit_mb);
     ret = write_cgroup_file(task_path, "memory.max", mem_limit);
     if (ret < 0) {
@@ -99,7 +97,26 @@ static long resman_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         return ret;
     }
 
-    pr_info("[resman] Task %s allocated %s memory\n", config.task_name, mem_limit);
+    // Set CPU limit if provided
+    if (config.cpu_share > 0) {
+        snprintf(cpu_limit, sizeof(cpu_limit), "%d 100000", config.cpu_share);
+        ret = write_cgroup_file(task_path, "cpu.max", cpu_limit);
+        if (ret < 0) {
+            pr_err("[resman] Failed to write CPU limit\n");
+            return ret;
+        }
+    }
+
+    // Assign process to cgroup
+    snprintf(pid_str, sizeof(pid_str), "%d", config.pid);
+    ret = write_cgroup_file(task_path, "cgroup.procs", pid_str);
+    if (ret < 0) {
+        pr_err("[resman] Failed to assign PID to cgroup\n");
+        return ret;
+    }
+
+    pr_info("[resman] Task %s: memory=%s, cpu=%dus, pid=%d\n",
+            config.task_name, mem_limit, config.cpu_share, config.pid);
     return 0;
 }
 
