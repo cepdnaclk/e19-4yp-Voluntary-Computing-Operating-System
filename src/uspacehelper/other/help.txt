@@ -1,0 +1,8 @@
+Help:
+- Use 'volcom --file <filename>' to load configurations from a file.
+- Use 'volcom config' to enter configuration mode.
+- Use 'volcom menu' to display the main menu.
+- Use 'volcom get'
+- Use 'volcome config'
+- Use 'key=value' format to set configurations.
+- Use 'q' to quit configuration mode.
