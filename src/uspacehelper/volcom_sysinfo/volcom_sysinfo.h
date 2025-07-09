@@ -54,7 +54,7 @@ struct gpu_info_s {
 // Function declarations for data collection
 struct memory_info_s get_memory_info(void);
 struct cpu_info_s get_cpu_info(void);
-struct cpu_info_s get_cpu_usage(cpu_info_s cpu_info);
+struct cpu_info_s get_cpu_usage(struct cpu_info_s cpu_info);
 struct gpu_info_s get_gpu_info(void);
 
 // Function declarations for printing information

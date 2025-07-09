@@ -70,7 +70,7 @@ struct cpu_info_s get_cpu_info(){
     return cpu_info;
 }
 
-struct cpu_info_s get_cpu_usage(cpu_info_s cpu_info){
+struct cpu_info_s get_cpu_usage(struct cpu_info_s cpu_info){
 
     FILE *fp = fopen("/proc/stat", "r");
 
@@ -109,7 +109,7 @@ struct cpu_info_s get_cpu_usage(cpu_info_s cpu_info){
                 cpu_info.overall_usage.usage_percent = (double)cpu_info.overall_usage.used / cpu_info.overall_usage.total * 100.0;
             }
         }
-        else if (strncmp(line, "cpu", 3) == 0 && line[3] >= '0' && line[3] <= '9' && current_core < core_count) {
+        else if (strncmp(line, "cpu", 3) == 0 && line[3] >= '0' && line[3] <= '9' && current_core < cpu_info.logical_processors) {
             sscanf(line, "cpu%*d %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu", 
                    &cpu_info.core_usage[current_core].user, &cpu_info.core_usage[current_core].nice, 
                    &cpu_info.core_usage[current_core].system, &cpu_info.core_usage[current_core].idle, 
