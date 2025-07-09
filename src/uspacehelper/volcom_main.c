@@ -19,7 +19,7 @@ void open_file(char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-    printf("argv %s %d\n", argv[1], argc);
+    // printf("argv %s %d\n", argv[1], argc);
 
     if (argc == 3 && strcmp(argv[1], "--file") == 0) {
         FILE *config = fopen(argv[2], "r");
@@ -40,14 +40,36 @@ int main(int argc, char *argv[]) {
                 break;
             } 
 
-            if (strcmp(input, "config") == 0) {
+            if (strncmp(input, "config ", 7) == 0) {
+                char *arg = input + 7;
+                char key[32];
+                int value;
+                int matched = sscanf(arg, "%31s %d", key, &value);
+                printf("%s\n", arg);
+                if (matched == 2) {
+                    if (strcmp(key, "memory") == 0) {
+                        printf("%d Mb of memory allocated for volcom\n", value);
+                    } else if (strcmp(key, "cpu") == 0) {
+                        printf("%d cores allocated for volcom\n", value);
+                    } else if (strcmp(key, "gpu") == 0) {
+                        printf("%d Mb of gpu memory allocated for volcom\n", value);
+                    } else {
+                        printf("Invalid configuration. Use `help` for usage information.\n");
+                    }
+                } else if (matched == 1) {
+                    if (strcmp(key, "memory") == 0 || strcmp(key, "cpu") == 0 || strcmp(key, "gpu") == 0) {
+                        printf("Please provide a value for %s.\n", key);
+                    } else {
+                        printf("Invalid configuration. Use `help` for usage information.\n");
+                    }
+                } else {
+                    printf("Invalid configuration. Use `help` for usage information.\n");
+                }
 
-            } else if (strcmp(input, "help") == 0) {
-
-                open_file("./other/help.txt");
-            } else if (strcmp(input, "menu") == 0) {
-
-                open_file("./other/menu.txt");
+            } else if (strncmp(input, "config", 6) == 0 && strlen(input) == 6) {
+                
+                printf("Configuration mode. Use 'config <key> <value>' to set configurations.\n");
+                printf("Available keys: memory, cpu, gpu.\n");  
             } else if (strncmp(input, "get ", 4) == 0) {
                 char *arg = input + 4;
                 if (strcmp(arg, "memory") == 0) {
@@ -67,9 +89,16 @@ int main(int argc, char *argv[]) {
                 }
             } else if (strcmp(input, "get") == 0) {
                 printf("Please specify what to get: memory, cpu, cpu_usage, or gpu.\n");
+            } else if (strcmp(input, "help") == 0) {
+
+                open_file("./other/help.txt");
+            } else if (strcmp(input, "menu") == 0) {
+
+                open_file("./other/menu.txt");
             } else {
                 printf("Invalid arguments. Use `help` for usage information.\n");
             }
+
             free(input);
         }
 
