@@ -1,45 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-struct memory_info_s {
-    unsigned long total;
-    unsigned long free;
-    unsigned long buffers;
-    unsigned long cached;
-    unsigned long swap_total;
-    unsigned long swap_free;
-};
-
-struct cpu_core_usage_s {
-    unsigned long user;
-    unsigned long nice;
-    unsigned long system;
-    unsigned long idle;
-    unsigned long iowait;
-    unsigned long irq;
-    unsigned long softirq;
-    unsigned long steal;
-    unsigned long guest;
-    unsigned long guest_nice;
-    unsigned long total;
-    unsigned long used;
-    double usage_percent;
-};
-
-struct cpu_info_s {
-    int cpu_count;
-    int logical_processors;
-    char model[256];
-    struct cpu_core_usage_s overall_usage;
-    struct cpu_core_usage_s *core_usage;  // Array for each logical processor
-};
-
-struct gpu_info_s {
-    char model[256];
-    unsigned long memory;
-    char driver[256];
-};
+#define _GNU_SOURCE
+#include "volcom_sysinfo.h"
 
 struct memory_info_s get_memory_info(){
 
@@ -76,17 +36,16 @@ struct memory_info_s get_memory_info(){
 struct cpu_info_s get_cpu_info(){
 
     struct cpu_info_s cpu_info = {0};
+    strcpy(cpu_info.model, "Unknown");
     FILE *fp = fopen("/proc/cpuinfo", "r");
 
     if (!fp) {
         perror("Failed to open /proc/cpuinfo");
-        strcpy(cpu_info.model, "Unknown");
         return cpu_info;
     }
 
     char line[256];
     int first_cpu = 1;
-    strcpy(cpu_info.model, "Unknown");
 
     while (fgets(line, sizeof(line), fp)) {
         if (strncmp(line, "processor", 9) == 0) {
@@ -111,87 +70,68 @@ struct cpu_info_s get_cpu_info(){
     return cpu_info;
 }
 
-struct cpu_info_s get_cpu_usage(){
+struct cpu_info_s get_cpu_usage(cpu_info_s cpu_info){
 
-    struct cpu_info_s cpu_usage = {0};
     FILE *fp = fopen("/proc/stat", "r");
 
     if (!fp) {
         perror("Failed to open /proc/stat");
-        return cpu_usage;
+        return cpu_info;
     }
 
     char line[256];
-    int core_count = 0;
-
-    // First pass: count the number of logical processors
-    while (fgets(line, sizeof(line), fp)) {
-        if (strncmp(line, "cpu", 3) == 0 && line[3] >= '0' && line[3] <= '9') {
-            core_count++;
-        }
-    }
     
-    // Allocate memory for core usage array
-    cpu_usage.core_usage = malloc(core_count * sizeof(struct cpu_core_usage_s));
-    if (!cpu_usage.core_usage) {
+    cpu_info.core_usage = malloc(cpu_info.logical_processors * sizeof(struct cpu_core_usage_s));
+    if (!cpu_info.core_usage) {
         perror("Failed to allocate memory for core usage");
         fclose(fp);
-        return cpu_usage;
+        return cpu_info;
     }
-    
-    cpu_usage.logical_processors = core_count;
-    
-    // Reset file pointer to beginning
-    rewind(fp);
     
     int current_core = 0;
     
     while (fgets(line, sizeof(line), fp)) {
         if (strncmp(line, "cpu ", 4) == 0) {
-            // Overall CPU usage
             sscanf(line, "cpu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu", 
-                   &cpu_usage.overall_usage.user, &cpu_usage.overall_usage.nice, 
-                   &cpu_usage.overall_usage.system, &cpu_usage.overall_usage.idle, 
-                   &cpu_usage.overall_usage.iowait, &cpu_usage.overall_usage.irq, 
-                   &cpu_usage.overall_usage.softirq, &cpu_usage.overall_usage.steal, 
-                   &cpu_usage.overall_usage.guest, &cpu_usage.overall_usage.guest_nice);
+                   &cpu_info.overall_usage.user, &cpu_info.overall_usage.nice, 
+                   &cpu_info.overall_usage.system, &cpu_info.overall_usage.idle, 
+                   &cpu_info.overall_usage.iowait, &cpu_info.overall_usage.irq, 
+                   &cpu_info.overall_usage.softirq, &cpu_info.overall_usage.steal, 
+                   &cpu_info.overall_usage.guest, &cpu_info.overall_usage.guest_nice);
             
-            // Calculate overall totals
-            cpu_usage.overall_usage.total = cpu_usage.overall_usage.user + cpu_usage.overall_usage.nice + 
-                                           cpu_usage.overall_usage.system + cpu_usage.overall_usage.idle + 
-                                           cpu_usage.overall_usage.iowait + cpu_usage.overall_usage.irq + 
-                                           cpu_usage.overall_usage.softirq + cpu_usage.overall_usage.steal;
-            cpu_usage.overall_usage.used = cpu_usage.overall_usage.total - cpu_usage.overall_usage.idle - cpu_usage.overall_usage.iowait;
+            cpu_info.overall_usage.total = cpu_info.overall_usage.user + cpu_info.overall_usage.nice + 
+                                           cpu_info.overall_usage.system + cpu_info.overall_usage.idle + 
+                                           cpu_info.overall_usage.iowait + cpu_info.overall_usage.irq + 
+                                           cpu_info.overall_usage.softirq + cpu_info.overall_usage.steal;
+            cpu_info.overall_usage.used = cpu_info.overall_usage.total - cpu_info.overall_usage.idle - cpu_info.overall_usage.iowait;
             
-            if (cpu_usage.overall_usage.total > 0) {
-                cpu_usage.overall_usage.usage_percent = (double)cpu_usage.overall_usage.used / cpu_usage.overall_usage.total * 100.0;
+            if (cpu_info.overall_usage.total > 0) {
+                cpu_info.overall_usage.usage_percent = (double)cpu_info.overall_usage.used / cpu_info.overall_usage.total * 100.0;
             }
         }
         else if (strncmp(line, "cpu", 3) == 0 && line[3] >= '0' && line[3] <= '9' && current_core < core_count) {
-            // Individual CPU core usage
             sscanf(line, "cpu%*d %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu", 
-                   &cpu_usage.core_usage[current_core].user, &cpu_usage.core_usage[current_core].nice, 
-                   &cpu_usage.core_usage[current_core].system, &cpu_usage.core_usage[current_core].idle, 
-                   &cpu_usage.core_usage[current_core].iowait, &cpu_usage.core_usage[current_core].irq, 
-                   &cpu_usage.core_usage[current_core].softirq, &cpu_usage.core_usage[current_core].steal, 
-                   &cpu_usage.core_usage[current_core].guest, &cpu_usage.core_usage[current_core].guest_nice);
+                   &cpu_info.core_usage[current_core].user, &cpu_info.core_usage[current_core].nice, 
+                   &cpu_info.core_usage[current_core].system, &cpu_info.core_usage[current_core].idle, 
+                   &cpu_info.core_usage[current_core].iowait, &cpu_info.core_usage[current_core].irq, 
+                   &cpu_info.core_usage[current_core].softirq, &cpu_info.core_usage[current_core].steal, 
+                   &cpu_info.core_usage[current_core].guest, &cpu_info.core_usage[current_core].guest_nice);
             
-            // Calculate per-core totals
-            cpu_usage.core_usage[current_core].total = cpu_usage.core_usage[current_core].user + 
-                                                      cpu_usage.core_usage[current_core].nice + 
-                                                      cpu_usage.core_usage[current_core].system + 
-                                                      cpu_usage.core_usage[current_core].idle + 
-                                                      cpu_usage.core_usage[current_core].iowait + 
-                                                      cpu_usage.core_usage[current_core].irq + 
-                                                      cpu_usage.core_usage[current_core].softirq + 
-                                                      cpu_usage.core_usage[current_core].steal;
-            cpu_usage.core_usage[current_core].used = cpu_usage.core_usage[current_core].total - 
-                                                     cpu_usage.core_usage[current_core].idle - 
-                                                     cpu_usage.core_usage[current_core].iowait;
+            cpu_info.core_usage[current_core].total = cpu_info.core_usage[current_core].user + 
+                                                      cpu_info.core_usage[current_core].nice + 
+                                                      cpu_info.core_usage[current_core].system + 
+                                                      cpu_info.core_usage[current_core].idle + 
+                                                      cpu_info.core_usage[current_core].iowait + 
+                                                      cpu_info.core_usage[current_core].irq + 
+                                                      cpu_info.core_usage[current_core].softirq + 
+                                                      cpu_info.core_usage[current_core].steal;
+            cpu_info.core_usage[current_core].used = cpu_info.core_usage[current_core].total - 
+                                                     cpu_info.core_usage[current_core].idle - 
+                                                     cpu_info.core_usage[current_core].iowait;
             
-            if (cpu_usage.core_usage[current_core].total > 0) {
-                cpu_usage.core_usage[current_core].usage_percent = 
-                    (double)cpu_usage.core_usage[current_core].used / cpu_usage.core_usage[current_core].total * 100.0;
+            if (cpu_info.core_usage[current_core].total > 0) {
+                cpu_info.core_usage[current_core].usage_percent = 
+                    (double)cpu_info.core_usage[current_core].used / cpu_info.core_usage[current_core].total * 100.0;
             }
             
             current_core++;
@@ -199,7 +139,7 @@ struct cpu_info_s get_cpu_usage(){
     }
 
     fclose(fp);
-    return cpu_usage;
+    return cpu_info;
 }
 
 struct gpu_info_s get_gpu_info(){
@@ -216,9 +156,8 @@ struct gpu_info_s get_gpu_info(){
         if (fgets(line, sizeof(line), fp)) {
             char *start = strstr(line, ": ");
             if (start) {
-                start += 2; // Skip ": "
+                start += 2; 
                 strncpy(gpu_info.model, start, sizeof(gpu_info.model) - 1);
-                // Remove newline if present
                 char *newline = strchr(gpu_info.model, '\n');
                 if (newline) *newline = '\0';
             }
@@ -239,10 +178,7 @@ void print_memory_info(struct memory_info_s mem_info) {
     printf("  Cached:        %lu MB\n", mem_info.cached/1024);
     printf("  Total Swap:    %lu MB\n", mem_info.swap_total/1024);
     printf("  Free Swap:     %lu MB\n", mem_info.swap_free/1024);
-    
-    unsigned long used_memory = mem_info.total - mem_info.free - mem_info.buffers - mem_info.cached;
-    double memory_usage_percent = (double)used_memory / mem_info.total * 100.0;
-    printf("  Memory Usage:  %.2f%%\n", memory_usage_percent);
+    printf("  Memory Usage:  %.2f%%\n", calculate_memory_usage_percent(mem_info));
 }
 
 void print_cpu_info(struct cpu_info_s cpu_info) {
@@ -294,30 +230,16 @@ void free_cpu_usage(struct cpu_info_s *cpu_usage) {
     }
 }
 
-int main() {
-    printf("=== System Information ===\n\n");
+// Utility function to calculate memory usage percentage
+double calculate_memory_usage_percent(struct memory_info_s mem_info) {
+    unsigned long used_memory = mem_info.total - mem_info.free - mem_info.buffers - mem_info.cached;
+    return (double)used_memory / mem_info.total * 100.0;
+}
 
-    // Get system information
-    struct memory_info_s mem_info = get_memory_info();
-    struct cpu_info_s cpu_info = get_cpu_info();
-    struct cpu_info_s cpu_usage = get_cpu_usage();
-    struct gpu_info_s gpu_info = get_gpu_info();
-
-    // Print system information with proper spacing
-    print_memory_info(mem_info);
-    printf("\n");
-    
-    print_cpu_info(cpu_info);
-    printf("\n");
-    
-    print_cpu_usage(cpu_usage);
-    printf("\n");
-    
-    print_gpu_info(gpu_info);
-    printf("\n");
-
-    // Clean up allocated memory
-    free_cpu_usage(&cpu_usage);
-
-    return 0;
+// Utility function to calculate CPU usage percentage
+double calculate_cpu_usage_percent(struct cpu_core_usage_s cpu_usage) {
+    if (cpu_usage.total > 0) {
+        return (double)cpu_usage.used / cpu_usage.total * 100.0;
+    }
+    return 0.0;
 }
