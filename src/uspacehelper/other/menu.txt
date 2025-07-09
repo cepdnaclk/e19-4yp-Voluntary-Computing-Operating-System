@@ -1,0 +1,9 @@
+Menu:
+- `get memory` - Print formatted memory info
+- `get cpu` - Print formatted CPU info
+- `get cpu_usage` - Print formatted CPU usage
+- `get gpu` - Print formatted GPU info
+- `config cpu <value>` - Set CPU cores configuration to <value>
+- `config memory <value>` - Set RAM configuration to <value>
+- `config gpu <value>` - Set GPU configuration to <value>
+- `q` - Exit the menu
