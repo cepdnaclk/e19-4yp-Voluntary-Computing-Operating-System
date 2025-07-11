@@ -28,28 +28,55 @@ double get_current_memory_percent() {
 }
 
 // Broadcast thread
+
 void* broadcast_loop(void* arg) {
-    char ip_addr[64];
-    get_local_ip(ip_addr, sizeof(ip_addr));
+    (void)arg;
+
+    char ip[64] = "Unknown";
+    get_local_ip(ip, sizeof(ip));
 
     while (keep_running) {
-        double mem_percent = get_current_memory_percent();
+        struct memory_info_s mem_info = get_memory_info();
+        struct cpu_info_s cpu_info = get_cpu_info();
+        cpu_info = get_cpu_usage(cpu_info);
+
+        double mem_percent = calculate_memory_usage_percent(mem_info);
+        double cpu_percent = cpu_info.overall_usage.usage_percent;
+        unsigned long free_mem_mb = mem_info.free / 1024;
+
+        // Construct JSON-style string
+        char message[1024];
+        snprintf(message, sizeof(message),
+            "{"
+              "\"ip\":\"%s\","
+              "\"free_mem_mb\":%lu,"
+              "\"mem_usage_percent\":%.2f,"
+              "\"cpu_usage_percent\":%.2f,"
+              "\"cpu_model\":\"%s\","
+              "\"logical_cores\":%d"
+            "}",
+            ip,
+            free_mem_mb,
+            mem_percent,
+            cpu_percent,
+            cpu_info.model,
+            cpu_info.logical_processors
+        );
 
         if (mem_percent < RESOURCE_THRESHOLD_PERCENT) {
-            char message[256];
-            snprintf(message, sizeof(message),
-                     "VOLCOM_EMPLOYEE|IP:%s|MEM:%.2f%%", ip_addr, mem_percent);
             send_udp_broadcast(message);
             printf("[Broadcasting] %s\n", message);
         } else {
             printf("[Broadcasting Paused] High memory usage: %.2f%%\n", mem_percent);
         }
 
+        free_cpu_usage(&cpu_info);
         sleep(BROADCAST_INTERVAL);
     }
 
     return NULL;
 }
+
 
 void run_employee_mode() {
     printf("[Employee] Monitoring system and broadcasting availability...\n");
