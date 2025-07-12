@@ -5,9 +5,11 @@
 #include <string.h>
 #include <signal.h>
 #include <pthread.h>
+#include <sys/socket.h> 
 #include "../../volcom_sysinfo/volcom_sysinfo.h"
 #include "../include/net_utils.h"
 #include "employee_mode.h"
+#include "task_receiver.h" 
 
 #define BROADCAST_INTERVAL 5              // seconds
 #define RESOURCE_THRESHOLD_PERCENT 80.0   // Max usage before stopping broadcast
@@ -16,6 +18,7 @@ static volatile bool keep_running = true;
 static pthread_t broadcaster_thread;
 
 void sigint_handler(int sig) {
+    (void)sig;
     keep_running = false;
     pthread_cancel(broadcaster_thread);
     printf("\n[Employee] Stopping broadcast and exiting...\n");
@@ -89,8 +92,7 @@ void run_employee_mode() {
         return;
     }
 
-    // TODO: Implement connection handler loop
-    printf("[Employee] Ready to accept connection requests (to be implemented)...\n");
+    printf("[Employee] Ready to accept connection request...\n");
     // TCP connection listener for employer requests
 int server_fd = start_tcp_server(12345);
 if (server_fd < 0) {
@@ -109,16 +111,32 @@ while (keep_running) {
         send(client_fd, accept_msg, strlen(accept_msg), 0);
         printf("[Employee] Connection Accepted. Stopping broadcast...\n");
 
-        keep_running = false;  // stop broadcast thread
+        keep_running = false;
         pthread_cancel(broadcaster_thread);
+        close(server_fd);  // Only server FD is closed; client remains open
 
+        //  Receive file while keeping client_fd open
+        char *received_file = handle_task_receive(client_fd);
+        if (!received_file) {
+            printf("[Employee] Failed to receive file.\n");
+            close(client_fd);
+            break;
+        }
+
+        // Future logic:
+        // - execute_task(received_file)
+        // - send_output_to_employer(client_fd, result_path)
+        // before sending result file back over client_fd use following signal to alert it about the result
+        char *header = "RESULT\n";
+        send(client_fd, header, strlen(header), 0);
+
+        // Then send the actual result file content...
+
+
+        free(received_file);  // Clean up path string
         close(client_fd);
-        close(server_fd);
-
-        // ➕ TODO: Call task receiving handler
-        system("./task_receiver"); // temporary stub
-
         break;
+
     } else {
         char reject_msg[] = "REJECT";
         send(client_fd, reject_msg, strlen(reject_msg), 0);

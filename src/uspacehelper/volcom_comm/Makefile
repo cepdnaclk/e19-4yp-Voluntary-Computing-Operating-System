@@ -12,6 +12,8 @@ SRC = comm_main.c \
       employer/employer_mode.c \
       employer/employee_list.c \
       employer/select_employee.c \
+      employer/send_task.c\
+      employee/task_receiver.c \
       $(COMMON_SRC)
 
 

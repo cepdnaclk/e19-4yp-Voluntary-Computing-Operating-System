@@ -10,6 +10,7 @@
 #include "employee_list.h"
 #include "employer_mode.h"
 #include "select_employee.h"
+#include "send_task.h"
 
 #define PORT 9876
 #define BUFFER_SIZE 2048
@@ -105,13 +106,34 @@ void run_employer_mode() {
 
     printf("\n[Employer] Finalizing employee list...\n");
     cleanup_old_employees(STALE_THRESHOLD);
+
+while (1) {
     EmployeeNodeWrapper *list = get_candidate_list();
-    char *chosen_ip = select_employee_ip(list);
-    if (chosen_ip) {
-        strncpy(selected_ip, chosen_ip, sizeof(selected_ip) - 1);
-        free(chosen_ip);
-        printf("\n[✔] Selected Employee IP: %s\n", selected_ip);
-    } else {
-        printf("[!] No valid employee selected.\n");
+    if (!list) {
+        printf("[!] No active employees found.\n");
+        return;
     }
+
+    char *chosen_ip = select_employee_ip(list);
+    if (!chosen_ip) {
+        printf("[!] No valid employee selected. Exiting.\n");
+        return;
+    }
+
+    printf("[Employer] Attempting to send task to %s...\n", chosen_ip);
+    
+    int success = send_task_to_employee(chosen_ip);
+    free(chosen_ip);
+
+    if (success) {
+        printf("[✔] Task executed and result received successfully.\n");
+        break;  // Done
+    } else {
+        printf("\n[!] Task failed. Either employee rejected, connection failed, or no result was received in time.\n");
+        printf("[!] You may try offloading the task to another available employee.\n");
+        sleep(1);  // small delay for usability
+        continue;  // Retry loop
+    }
+}
+
 }
