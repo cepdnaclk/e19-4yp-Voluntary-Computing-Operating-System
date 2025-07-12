@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "employee/employee_mode.h"
-// #include "employer/employer_mode.h"
+#include "employer/employer_mode.h"
 
 void show_menu() {
     printf("\n=== Voluntary Computing Node ===\n");
@@ -23,7 +23,7 @@ int main() {
     switch (choice) {
         case 1:
             printf("Launching in Employer Mode...\n");
-            //run_employer_mode();  // defined in employer_mode.c
+            run_employer_mode();  // defined in employer_mode.c
             break;
         case 2:
             printf("Launching in Employee Mode...\n");
