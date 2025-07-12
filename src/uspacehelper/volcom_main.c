@@ -18,15 +18,20 @@ void open_file(char *filename) {
     fclose(file);
 }
 
+void configure_memory(struct config_s *config) {
+    
+    // TODO: Implement memory configuration logic
+    printf("Memory configuration is not implemented yet.\n");
+}
+
 int main(int argc, char *argv[]) {
-    // printf("argv %s %d\n", argv[1], argc);
+    struct config_s config = {0};
 
     if (argc == 3 && strcmp(argv[1], "--file") == 0) {
-        FILE *config = fopen(argv[2], "r");
 
-        // Extract configurations
+        config = load_config(argv[2]);
+        print_config(config);
 
-        fclose(config);
         return 0;
     } else {
         while (1) {
@@ -40,6 +45,7 @@ int main(int argc, char *argv[]) {
                 break;
             } 
 
+            // TODO: Implement configuration logic
             if (strncmp(input, "config ", 7) == 0) {
                 char *arg = input + 7;
                 char key[32];

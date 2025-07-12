@@ -1,0 +1,15 @@
+System Configuration:
+----------------------
+
+Memory Configuration:
+----------------------
+Memory Size (Max): 1048576 kB
+Memory Size (High): 524288 kB
+Swap Memory Size (Max): 1048576 kB
+Swap Memory Size (High): 524288 kB
+Memory OOM Protection: 1
+
+CPU Configuration:
+----------------------
+Allocated Logical Processors: 1
+Allocated CPU Share: 1024
