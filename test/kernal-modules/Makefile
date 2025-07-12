@@ -1,4 +1,4 @@
-obj-m += procfs3.o
+obj-m += ioctl.o
 
 PWD := $(CURDIR)
 

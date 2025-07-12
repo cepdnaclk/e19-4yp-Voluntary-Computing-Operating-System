@@ -28,7 +28,7 @@ enum {
 	CDEV_EXCLUSIVE_OPEN,
 };
 
-static atomic_t already_open = ATOMIC_INIT(CDEV_EXCLUSIVE_OPEN);
+static atomic_t already_open = ATOMIC_INIT(CDEV_NOT_USED);
 
 static char msg[BUF_LEN + 1];
 
