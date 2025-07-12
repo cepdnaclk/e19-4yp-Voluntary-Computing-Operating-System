@@ -168,6 +168,102 @@ struct gpu_info_s get_gpu_info(){
     return gpu_info;
 }
 
+struct system_info_s get_system_info() {
+    struct system_info_s config = {0};
+    
+    config.mem_info = get_memory_info();
+    
+    config.cpu_info = get_cpu_info();
+    
+    config.cpu_info = get_cpu_usage(config.cpu_info);
+    
+    config.gpu_info = get_gpu_info();
+    
+    return config;
+}
+
+int save_config(const char *filename, struct config_s config) {
+
+    FILE *fp = fopen(filename, "w");
+
+    if (!fp) {
+        perror("Failed to open config file for writing");
+        return -1;
+    }
+
+    fprintf(fp, "System Configuration:\n");
+    fprintf(fp, "----------------------\n");
+
+    fprintf(fp, "\nMemory Configuration:\n");
+    fprintf(fp, "----------------------\n");
+    fprintf(fp, "Memory Size (Max): %lu kB\n", config.mem_config.allocated_memory_size_max);
+    fprintf(fp, "Memory Size (High): %lu kB\n", config.mem_config.allocated_memory_size_high);
+    fprintf(fp, "Swap Memory Size (Max): %lu kB\n", config.mem_config.allocated_swap_memory_size_max);
+    fprintf(fp, "Swap Memory Size (High): %lu kB\n", config.mem_config.allocated_swap_memory_size_high);
+    fprintf(fp, "Memory OOM Protection: %d\n", config.mem_config.memory_oom_protection);
+    
+    fprintf(fp, "\nCPU Configuration:\n");
+    fprintf(fp, "----------------------\n");
+    fprintf(fp, "Allocated Logical Processors: %d\n", config.cpu_config.allocated_logical_processors);
+    fprintf(fp, "Allocated CPU Share: %d\n", config.cpu_config.allocated_cpu_share);
+
+    fclose(fp);
+    return 0;
+}
+
+struct config_s load_config(const char *filename) {
+
+    struct config_s config = {0};
+    FILE *fp = fopen(filename, "r");
+
+    if (!fp) {
+        perror("Failed to open config file for reading");
+        return config;
+    }   
+    char line[256];
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (sscanf(line, "Memory Size (Max): %lu kB", &config.mem_config.allocated_memory_size_max) == 1) continue;
+        if (sscanf(line, "Memory Size (High): %lu kB", &config.mem_config.allocated_memory_size_high) == 1) continue;
+        if (sscanf(line, "Swap Memory Size (Max): %lu kB", &config.mem_config.allocated_swap_memory_size_max) == 1) continue;
+        if (sscanf(line, "Swap Memory Size (High): %lu kB", &config.mem_config.allocated_swap_memory_size_high) == 1) continue;
+        if (sscanf(line, "Memory OOM Protection: %d", &config.mem_config.memory_oom_protection) == 1) continue;
+        if (sscanf(line, "Allocated Logical Processors: %d", &config.cpu_config.allocated_logical_processors) == 1) continue;
+        if (sscanf(line, "Allocated CPU Share: %d", &config.cpu_config.allocated_cpu_share) == 1) continue;
+    }
+
+    if (config.mem_config.allocated_memory_size_max == 0) {
+        config.mem_config.allocated_memory_size_max = 1024 * 1024; // Default to 1 GB
+    }
+
+    if (config.mem_config.allocated_memory_size_high == 0) {
+        config.mem_config.allocated_memory_size_high = 512 * 1024; // Default to 512 MB
+    }
+
+    if (config.mem_config.allocated_swap_memory_size_max == 0) {
+        config.mem_config.allocated_swap_memory_size_max = 1024 * 1024; // Default to 1 GB
+    }
+
+    if (config.mem_config.allocated_swap_memory_size_high == 0) {
+        config.mem_config.allocated_swap_memory_size_high = 512 * 1024; // Default to 512 MB
+    }
+
+    if (config.cpu_config.allocated_logical_processors == 0) {
+        config.cpu_config.allocated_logical_processors = 1; // Default to 1 logical processor
+    }
+
+    if (config.cpu_config.allocated_cpu_share == 0) {
+        config.cpu_config.allocated_cpu_share = 1024; // Default to 1024
+    }   
+
+    if (config.mem_config.memory_oom_protection == 0) {
+        config.mem_config.memory_oom_protection = 1; // Default to enabled
+    }
+
+    fclose(fp);
+    return config;
+}
+
 void print_memory_info(struct memory_info_s mem_info) {
     printf("Memory Information:\n");
     printf("  Total Memory:  %lu MB (%.2f GB)\n", 
@@ -221,6 +317,30 @@ void print_gpu_info(struct gpu_info_s gpu_info) {
     } else {
         printf("  Memory: Unknown\n");
     }
+}
+
+void print_system_info(struct system_info_s sys_info) {
+    printf("System Information:\n");
+    printf("----------------------\n");
+    print_memory_info(sys_info.mem_info);
+    print_cpu_info(sys_info.cpu_info);
+    print_cpu_usage(sys_info.cpu_info);
+    print_gpu_info(sys_info.gpu_info);
+}
+
+void print_config(struct config_s config) {
+    printf("Configuration Information:\n");
+    printf("----------------------------\n");
+    printf("Memory Configuration:\n");
+    printf("  Max Allocated Memory: %lu MB\n", config.mem_config.allocated_memory_size_max / 1024);
+    printf("  High Allocated Memory: %lu MB\n", config.mem_config.allocated_memory_size_high / 1024);
+    printf("  Max Allocated Swap: %lu MB\n", config.mem_config.allocated_swap_memory_size_max / 1024);
+    printf("  High Allocated Swap: %lu MB\n", config.mem_config.allocated_swap_memory_size_high / 1024);
+    printf("  OOM Protection: %s\n", config.mem_config.memory_oom_protection ? "Enabled" : "Disabled");
+
+    printf("\nCPU Configuration:\n");
+    printf("  Allocated Logical Processors: %d\n", config.cpu_config.allocated_logical_processors);
+    printf("  Allocated CPU Share: %d\n", config.cpu_config.allocated_cpu_share);
 }
 
 void free_cpu_usage(struct cpu_info_s *cpu_usage) {
