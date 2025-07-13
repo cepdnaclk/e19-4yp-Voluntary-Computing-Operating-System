@@ -22,9 +22,6 @@ Observe the Output:
 
 You’ll see system resource JSON being broadcasted every 5 seconds, like:
 
-json
-Copy
-Edit
 [Broadcasting] {
   "ip":"192.168.1.42",
   "free_mem_mb":2048,
@@ -39,9 +36,3 @@ If memory usage exceeds the threshold, broadcasting pauses:
 [Broadcasting Paused] High memory usage: 93.4%
 Stop Execution:
 Press Ctrl+C to stop the employee node.
-
-
-You can run netcat or tcpdump on another terminal or machine in the same network:
-
-# Listen for UDP broadcasts
-nc -ul 9876

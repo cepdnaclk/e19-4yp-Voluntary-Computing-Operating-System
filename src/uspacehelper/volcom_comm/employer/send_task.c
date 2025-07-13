@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
+#include <libgen.h> // for basename()
 #include "send_task.h"
 
 #define EMPLOYEE_PORT 12345
@@ -19,12 +20,37 @@ int file_exists(const char *path) {
     return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
 }
 
-int send_file(int sockfd, const char *filepath) {
+// Sanitize IP address for filename (e.g., 192.168.1.2 -> 192_168_1_2)
+void sanitize_ip(const char *ip, char *output) {
+    for (int i = 0; ip[i]; ++i) {
+        output[i] = (ip[i] == '.') ? '_' : ip[i];
+    }
+    output[strlen(ip)] = '\0';
+}
+
+int send_file(int sockfd, const char *filepath, const char *ip) {
     FILE *fp = fopen(filepath, "rb");
     if (!fp) {
         perror("[send_task] Failed to open file");
         return 0;
     }
+
+    char filename[256];
+    char *base = basename((char *)filepath);
+    strncpy(filename, base, sizeof(filename));
+    filename[sizeof(filename) - 1] = '\0';
+
+    // Send filename to employee
+    send(sockfd, filename, strlen(filename) + 1, 0);  // +1 to send null terminator
+    printf("[send_task] Sent filename to employee: %s\n", filename);
+
+    // Construct task filename for log/reference
+    char sanitized_ip[64];
+    sanitize_ip(ip, sanitized_ip);
+
+    char task_filename[512];
+    snprintf(task_filename, sizeof(task_filename), "task_%ld_%s_%s", time(NULL), sanitized_ip, filename);
+    printf("[send_task] Task filename (internal): %s\n", task_filename);
 
     char buffer[BUFFER_SIZE];
     size_t bytes_read;
@@ -41,7 +67,7 @@ int send_file(int sockfd, const char *filepath) {
 
     fclose(fp);
 
-    // Tell receiver file is finished, but keep socket open for result
+    // Notify EOF for file but keep socket open for result
     if (shutdown(sockfd, SHUT_WR) < 0) {
         perror("[send_task] Failed to shutdown write stream");
     }
@@ -50,8 +76,7 @@ int send_file(int sockfd, const char *filepath) {
     return 1;
 }
 
-int receive_task_result(int sockfd);
-
+int receive_task_result(int sockfd, const char *ip, const char *original_filename);
 
 int send_task_to_employee(const char *ip) {
     struct sockaddr_in addr;
@@ -107,17 +132,19 @@ int send_task_to_employee(const char *ip) {
         printf("[send_task] File does not exist or is not a regular file. Try again.\n");
     }
 
-    int result = send_file(sockfd, filepath);
-if (result) {
-    printf("[send_task] Waiting for task result from employee...\n");
-    int recv_success = receive_task_result(sockfd);
+    // Extract original filename
+    char *original_filename = basename(filepath);
+
+    int result = send_file(sockfd, filepath, ip);
+    if (result) {
+        printf("[send_task] Waiting for task result from employee...\n");
+        int recv_success = receive_task_result(sockfd, ip, original_filename);
+        close(sockfd);
+        return recv_success;
+    }
+
     close(sockfd);
-    return recv_success;  // Only return 1 if result is received
-}
-
-close(sockfd);
-return 0;
-
+    return 0;
 }
 
 static void ensure_directory_exists(const char *dir) {
@@ -127,19 +154,23 @@ static void ensure_directory_exists(const char *dir) {
     }
 }
 
-int receive_task_result(int sockfd) {
+int receive_task_result(int sockfd, const char *ip, const char *original_filename) {
     ensure_directory_exists("received_outputs");
 
-    char path[256];
-    snprintf(path, sizeof(path), "received_outputs/result_%ld.bin", time(NULL));
+    char sanitized_ip[64];
+    sanitize_ip(ip, sanitized_ip);
 
-    FILE *fp = fopen(path, "wb");
+    char result_filename[512];
+    snprintf(result_filename, sizeof(result_filename),
+             "received_outputs/result_%ld_%s_%s", time(NULL), sanitized_ip, original_filename);
+
+    FILE *fp = fopen(result_filename, "wb");
     if (!fp) {
         perror("[send_task] Failed to create result file");
         return 0;
     }
 
-    char buffer[4096];
+    char buffer[BUFFER_SIZE];
     ssize_t len;
     size_t total = 0;
     const char *marker = "RESULT\n";
@@ -151,7 +182,6 @@ int receive_task_result(int sockfd) {
     char tempbuf[512] = {0};
     size_t collected = 0;
 
-    // Step 1: Wait for marker
     while (time(NULL) - start_time < 60) {
         ssize_t n = recv(sockfd, &tempbuf[collected], sizeof(tempbuf) - collected - 1, MSG_DONTWAIT);
         if (n > 0) {
@@ -162,15 +192,12 @@ int receive_task_result(int sockfd) {
             if (found) {
                 printf("[send_task] Result marker received.\n");
 
-                // Shift remaining data after marker to the buffer
                 size_t offset = (found - tempbuf) + marker_len;
                 size_t remaining = collected - offset;
                 if (remaining > 0) {
                     fwrite(found + marker_len, 1, remaining, fp);
                     total += remaining;
                 }
-
-                // Go to Step 2: Start receiving rest of the file
                 break;
             }
 
@@ -189,16 +216,12 @@ int receive_task_result(int sockfd) {
         return 0;
     }
 
-    // Step 2: Receive actual result file data
     while ((len = recv(sockfd, buffer, sizeof(buffer), 0)) > 0) {
         fwrite(buffer, 1, len, fp);
         total += len;
     }
 
     fclose(fp);
-    printf("[send_task] Result received: %zu bytes → saved to %s\n", total, path);
+    printf("[send_task] Result received: %zu bytes → saved to %s\n", total, result_filename);
     return (total > 0);
 }
-
-
-

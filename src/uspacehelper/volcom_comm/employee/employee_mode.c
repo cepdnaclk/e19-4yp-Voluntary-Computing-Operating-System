@@ -34,7 +34,6 @@ double get_current_memory_percent() {
 }
 
 // Broadcast thread
-
 void* broadcast_loop(void* arg) {
     (void)arg;
 
@@ -124,16 +123,22 @@ void run_employee_mode() {
             pthread_cancel(broadcaster_thread);
             close(server_fd);  // Only server FD is closed; client remains open
 
-            // Receive task
-            char *received_file = handle_task_receive(client_fd);
+            // Receive task (also extracts original filename from header)
+            char *received_file = handle_task_receive(client_fd, employer_ip);
             if (!received_file) {
                 printf("[Employee] Failed to receive file.\n");
                 close(client_fd);
                 break;
             }
 
-            // Send result file back
-            send_output_to_employer(client_fd, "/home/geeth99/FYP/e19-4yp-Voluntary-Computing-Operating-System/src/uspacehelper/volcom_comm/employee/result_folder", employer_ip);
+            //add execution logic later using the file_path and return the path for result. currently use this
+            const char *result_path ="employee/result_folder/result_178456985_192_168_8_103_README.bin";
+
+
+            // Send result file back based on original filename and employer IP
+            send_output_to_employer(client_fd, 
+                result_path
+            );
 
             free(received_file);
             close(client_fd);
