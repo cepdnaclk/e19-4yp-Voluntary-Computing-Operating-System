@@ -6,10 +6,13 @@
 #include <signal.h>
 #include <pthread.h>
 #include <sys/socket.h> 
+#include <netinet/in.h>  // for sockaddr_in, INET_ADDRSTRLEN
+#include <arpa/inet.h>   // for inet_ntop
 #include "../../volcom_sysinfo/volcom_sysinfo.h"
 #include "../include/net_utils.h"
 #include "employee_mode.h"
 #include "task_receiver.h" 
+#include "send_result.h"
 
 #define BROADCAST_INTERVAL 5              // seconds
 #define RESOURCE_THRESHOLD_PERCENT 80.0   // Max usage before stopping broadcast
@@ -86,65 +89,63 @@ void run_employee_mode() {
 
     signal(SIGINT, sigint_handler);  // Graceful Ctrl+C exit
 
-    // Start broadcaster thread
     if (pthread_create(&broadcaster_thread, NULL, broadcast_loop, NULL) != 0) {
         perror("Failed to create broadcaster thread");
         return;
     }
 
     printf("[Employee] Ready to accept connection request...\n");
-    // TCP connection listener for employer requests
-int server_fd = start_tcp_server(12345);
-if (server_fd < 0) {
-    fprintf(stderr, "[Employee] TCP server failed to start\n");
-    return;
-}
 
-while (keep_running) {
-    int client_fd = accept_tcp_connection(server_fd);
-    if (client_fd < 0) continue;
+    int server_fd = start_tcp_server(12345);
+    if (server_fd < 0) {
+        fprintf(stderr, "[Employee] TCP server failed to start\n");
+        return;
+    }
 
-    double mem_percent = get_current_memory_percent();
+    while (keep_running) {
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addr_len);
+        if (client_fd < 0) continue;
 
-    if (mem_percent < RESOURCE_THRESHOLD_PERCENT) {
-        char accept_msg[] = "ACCEPT";
-        send(client_fd, accept_msg, strlen(accept_msg), 0);
-        printf("[Employee] Connection Accepted. Stopping broadcast...\n");
+        // Get employer IP address
+        char employer_ip[INET_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET, &client_addr.sin_addr, employer_ip, sizeof(employer_ip));
+        printf("[Employee] Connection request from %s\n", employer_ip);
 
-        keep_running = false;
-        pthread_cancel(broadcaster_thread);
-        close(server_fd);  // Only server FD is closed; client remains open
+        double mem_percent = get_current_memory_percent();
 
-        //  Receive file while keeping client_fd open
-        char *received_file = handle_task_receive(client_fd);
-        if (!received_file) {
-            printf("[Employee] Failed to receive file.\n");
+        if (mem_percent < RESOURCE_THRESHOLD_PERCENT) {
+            char accept_msg[] = "ACCEPT";
+            send(client_fd, accept_msg, strlen(accept_msg), 0);
+            printf("[Employee] Connection Accepted. Stopping broadcast...\n");
+
+            keep_running = false;
+            pthread_cancel(broadcaster_thread);
+            close(server_fd);  // Only server FD is closed; client remains open
+
+            // Receive task
+            char *received_file = handle_task_receive(client_fd);
+            if (!received_file) {
+                printf("[Employee] Failed to receive file.\n");
+                close(client_fd);
+                break;
+            }
+
+            // Send result file back
+            send_output_to_employer(client_fd, "/home/geeth99/FYP/e19-4yp-Voluntary-Computing-Operating-System/src/uspacehelper/volcom_comm/employee/result_folder", employer_ip);
+
+            free(received_file);
             close(client_fd);
             break;
+
+        } else {
+            char reject_msg[] = "REJECT";
+            send(client_fd, reject_msg, strlen(reject_msg), 0);
+            close(client_fd);
+            printf("[Employee] Rejected connection due to high usage.\n");
         }
-
-        // Future logic:
-        // - execute_task(received_file)
-        // - send_output_to_employer(client_fd, result_path)
-        // before sending result file back over client_fd use following signal to alert it about the result
-        char *header = "RESULT\n";
-        send(client_fd, header, strlen(header), 0);
-
-        // Then send the actual result file content...
-
-
-        free(received_file);  // Clean up path string
-        close(client_fd);
-        break;
-
-    } else {
-        char reject_msg[] = "REJECT";
-        send(client_fd, reject_msg, strlen(reject_msg), 0);
-        close(client_fd);
-        printf("[Employee] Rejected connection due to high usage.\n");
     }
-}
-
 
     pthread_join(broadcaster_thread, NULL);
 }

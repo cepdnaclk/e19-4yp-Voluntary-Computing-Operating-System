@@ -14,7 +14,7 @@
 
 #define PORT 9876
 #define BUFFER_SIZE 2048
-#define COLLECTION_TIMEOUT 10       // Time to wait after first employee is found
+#define COLLECTION_TIMEOUT 5       // Time to wait after first employee is found
 #define STALE_THRESHOLD 15
 
 static char selected_ip[64] = "";
