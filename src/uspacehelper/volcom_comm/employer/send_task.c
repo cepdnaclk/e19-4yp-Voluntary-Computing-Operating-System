@@ -20,6 +20,14 @@ int file_exists(const char *path) {
     return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
 }
 
+static void ensure_directory_exists(const char *dir) {
+    struct stat st = {0};
+    if (stat(dir, &st) == -1) {
+        mkdir(dir, 0755);
+    }
+}
+
+
 // Sanitize IP address for filename (e.g., 192.168.1.2 -> 192_168_1_2)
 void sanitize_ip(const char *ip, char *output) {
     for (int i = 0; ip[i]; ++i) {
@@ -41,40 +49,64 @@ int send_file(int sockfd, const char *filepath, const char *ip) {
     filename[sizeof(filename) - 1] = '\0';
 
     // Send filename to employee
-    send(sockfd, filename, strlen(filename) + 1, 0);  // +1 to send null terminator
+    send(sockfd, filename, strlen(filename) + 1, 0);  // +1 for null terminator
     printf("[send_task] Sent filename to employee: %s\n", filename);
 
-    // Construct task filename for log/reference
     char sanitized_ip[64];
     sanitize_ip(ip, sanitized_ip);
-
-    char task_filename[512];
-    snprintf(task_filename, sizeof(task_filename), "task_%ld_%s_%s", time(NULL), sanitized_ip, filename);
-    printf("[send_task] Task filename (internal): %s\n", task_filename);
 
     char buffer[BUFFER_SIZE];
     size_t bytes_read;
 
     printf("[send_task] Sending file contents...\n");
 
+    // Create a temporary in-memory copy to save later
+    char temp_copy_path[512];
+    snprintf(temp_copy_path, sizeof(temp_copy_path), "/tmp/__volcom_send_temp_%ld", time(NULL));
+
+    FILE *temp_copy_fp = fopen(temp_copy_path, "wb");
+    if (!temp_copy_fp) {
+        perror("[send_task] Failed to create temp copy");
+        fclose(fp);
+        return 0;
+    }
+
+    // Send + copy file content
     while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, fp)) > 0) {
         if (send(sockfd, buffer, bytes_read, 0) != bytes_read) {
             perror("[send_task] Failed to send file");
             fclose(fp);
+            fclose(temp_copy_fp);
+            remove(temp_copy_path);
             return 0;
         }
+        fwrite(buffer, 1, bytes_read, temp_copy_fp);
     }
 
     fclose(fp);
+    fclose(temp_copy_fp);
 
-    // Notify EOF for file but keep socket open for result
+    // Notify EOF
     if (shutdown(sockfd, SHUT_WR) < 0) {
         perror("[send_task] Failed to shutdown write stream");
+    }
+
+    // Save the copy to sent_files
+    ensure_directory_exists("sent_files");
+    char destination_path[512];
+    snprintf(destination_path, sizeof(destination_path),
+             "sent_files/task_%ld_%s_%s", time(NULL), sanitized_ip, filename);
+
+    if (rename(temp_copy_path, destination_path) != 0) {
+        perror("[send_task] Failed to move sent file to sent_files");
+    } else {
+        printf("[send_task] Backup saved: %s\n", destination_path);
     }
 
     printf("[send_task] File sent successfully.\n");
     return 1;
 }
+
 
 int receive_task_result(int sockfd, const char *ip, const char *original_filename);
 
@@ -147,12 +179,6 @@ int send_task_to_employee(const char *ip) {
     return 0;
 }
 
-static void ensure_directory_exists(const char *dir) {
-    struct stat st = {0};
-    if (stat(dir, &st) == -1) {
-        mkdir(dir, 0755);
-    }
-}
 
 int receive_task_result(int sockfd, const char *ip, const char *original_filename) {
     ensure_directory_exists("received_outputs");

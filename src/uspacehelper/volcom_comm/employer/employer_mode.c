@@ -137,3 +137,6 @@ while (1) {
 }
 
 }
+
+
+//store sent tasks and delete them when result is received
