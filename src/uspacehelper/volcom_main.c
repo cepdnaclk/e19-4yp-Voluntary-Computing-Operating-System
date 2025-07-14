@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include "volcom_sysinfo/volcom_sysinfo.h"
 #include "volcom_rcsmngr/volcom_rcsmngr.h"
 
@@ -97,6 +100,45 @@ void configure_by_cmd(struct config_s *config) {
         }
 }
 
+void run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path) {
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork failed");
+        return;
+    }
+
+    if (pid == 0) {
+        // Child process - execute Node.js script
+        printf("Child process %d starting Node.js task: %s\n", getpid(), task_name);
+        execlp("node", "node", script_path, NULL);
+        perror("execlp failed - Node.js not found or script error");
+        exit(1);
+    } else {
+        // Parent process - add child to cgroup
+        printf("Created child process %d for task '%s'\n", pid, task_name);
+        
+        // Add the process to the main cgroup
+        if (volcom_add_pid_to_cgroup(manager, manager->main_cgroup.name, pid) == 0) {
+            printf("Added process %d to main cgroup '%s'\n", pid, manager->main_cgroup.name);
+        } else {
+            printf("Failed to add process %d to cgroup\n", pid);
+        }
+
+        // Wait for the child process to complete
+        int status;
+        printf("Waiting for Node.js task to complete...\n");
+        waitpid(pid, &status, 0);
+        
+        if (WIFEXITED(status)) {
+            printf("Task '%s' completed with exit code %d\n", task_name, WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            printf("Task '%s' terminated by signal %d\n", task_name, WTERMSIG(status));
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
 
     struct volcom_rcsmngr_s manager;
@@ -124,6 +166,8 @@ int main(int argc, char *argv[]) {
         }
 
         volcom_print_cgroup_info(&manager);
+
+        run_node_in_cgroup(&manager, "Node.js Task", "./scripts/test_script.js");
 
         //Cleanup
         volcom_delete_main_cgroup(&manager);
