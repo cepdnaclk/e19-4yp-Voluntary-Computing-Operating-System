@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "volcom_sysinfo/volcom_sysinfo.h"
+#include "volcom_rcsmngr/volcom_rcsmngr.h"
 
 void open_file(char *filename) {
     FILE *file = fopen(filename, "r");
@@ -97,12 +98,36 @@ void configure_by_cmd(struct config_s *config) {
 }
 
 int main(int argc, char *argv[]) {
+
+    struct volcom_rcsmngr_s manager;
     struct config_s config = {0};
+
+     if (getuid() != 0) {
+        printf("This programme requires root privileges. Please run with sudo.\n");
+        return 1;
+    }
 
     if (argc == 3 && strcmp(argv[1], "--file") == 0) {
 
         config = load_config(argv[2]);
         print_config(config);
+
+        if (volcom_rcsmngr_init(&manager, "volcom") != 0) {
+            fprintf(stderr, "Failed to initialize resource manager\n");
+            return 1;
+        }
+
+        if (volcom_create_main_cgroup(&manager, config) != 0) {
+            fprintf(stderr, "Failed to create main cgroup\n");
+            volcom_rcsmngr_cleanup(&manager);
+            return 1;
+        }
+
+        volcom_print_cgroup_info(&manager);
+
+        //Cleanup
+        volcom_delete_main_cgroup(&manager);
+        volcom_rcsmngr_cleanup(&manager);
 
         return 0;
     } else {
