@@ -18,23 +18,10 @@ void open_file(char *filename) {
     fclose(file);
 }
 
-void configure_memory(struct config_s *config) {
+void configure_by_cmd(struct config_s *config) {
     
     // TODO: Implement memory configuration logic
-    printf("Memory configuration is not implemented yet.\n");
-}
-
-int main(int argc, char *argv[]) {
-    struct config_s config = {0};
-
-    if (argc == 3 && strcmp(argv[1], "--file") == 0) {
-
-        config = load_config(argv[2]);
-        print_config(config);
-
-        return 0;
-    } else {
-        while (1) {
+    while (1) {
             char *input = malloc(256);
             printf("Enter configuration (or 'q' to quit or 'menu' for menu): ");
             fgets(input, 256, stdin);
@@ -107,7 +94,20 @@ int main(int argc, char *argv[]) {
 
             free(input);
         }
+}
 
+int main(int argc, char *argv[]) {
+    struct config_s config = {0};
+
+    if (argc == 3 && strcmp(argv[1], "--file") == 0) {
+
+        config = load_config(argv[2]);
+        print_config(config);
+
+        return 0;
+    } else {
+
+        configure_by_cmd(&config);
         return 0;
     }
 }
