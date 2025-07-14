@@ -9,8 +9,14 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("SPM");
-MODULE_DESCRIPTION("Task Scheduler - Basic Scheduling Logic");
-MODULE_VERSION("0.2");
+MODULE_DESCRIPTION("Task Scheduler with State Tracking");
+MODULE_VERSION("0.3");
+
+enum task_state {
+    QUEUED,
+    RUNNING,
+    COMPLETED
+};
 
 struct device_info {
     int id;
@@ -20,6 +26,7 @@ struct device_info {
 struct task {
     int task_id;
     int assigned_device;
+    enum task_state state;
     struct list_head list;
 };
 
@@ -58,9 +65,10 @@ static void schedule_task(void) {
 
     new_task->task_id = task_counter++;
     new_task->assigned_device = find_least_loaded_device();
+    new_task->state = QUEUED;
     list_add_tail(&new_task->list, &task_list);
 
-    printk(KERN_INFO "Task %d assigned to device %d\n", new_task->task_id, new_task->assigned_device);
+    printk(KERN_INFO "Task %d assigned to device %d [QUEUED]\n", new_task->task_id, new_task->assigned_device);
 }
 
 static int __init scheduler_init(void) {
