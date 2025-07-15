@@ -85,6 +85,8 @@ struct cpu_info_s get_cpu_info(void);
 struct cpu_info_s get_cpu_usage(struct cpu_info_s cpu_info);
 struct gpu_info_s get_gpu_info(void);
 struct system_info_s get_system_info(void);
+
+// Function declarations for configuration management
 int save_config(const char *filename, struct config_s config);
 struct config_s load_config(const char *filename);
 
