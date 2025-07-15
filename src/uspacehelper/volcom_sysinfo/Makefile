@@ -8,7 +8,7 @@ OBJECT = volcom_sysinfo.o
 LIBRARY = libvolcom_sysinfo.a
 
 # Default target
-all: $(LIBRARY) main_example
+all: $(LIBRARY) test_sysinfo
 
 # Create object file
 $(OBJECT): $(SOURCES) $(HEADERS)
@@ -18,13 +18,14 @@ $(OBJECT): $(SOURCES) $(HEADERS)
 $(LIBRARY): $(OBJECT)
 	ar rcs $(LIBRARY) $(OBJECT)
 
-# Compile main example
-main_example: main_example.c $(LIBRARY)
-	$(CC) $(CFLAGS) main_example.c -L. -lvolcom_sysinfo -o main_example
+# Compile test_sysinfo
+test_sysinfo: test_sysinfo.c $(LIBRARY)
+	$(CC) $(CFLAGS) test_sysinfo.c -L. -lvolcom_sysinfo -o test_sysinfo
+	./test_sysinfo
 
 # Clean build files
 clean:
-	rm -f $(OBJECT) $(LIBRARY) main_example
+	rm -f $(OBJECT) $(LIBRARY) test_sysinfo
 
 # Install header and library (optional)
 install: $(LIBRARY) $(HEADERS)
@@ -36,9 +37,9 @@ install: $(LIBRARY) $(HEADERS)
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  all           - Build library and main example"
+	@echo "  all           - Build library and test_sysinfo"
 	@echo "  $(LIBRARY)    - Build static library"
-	@echo "  main_example  - Build example using static library"
+	@echo "  test_sysinfo  - Build example using static library"
 	@echo "  clean         - Remove build files"
 	@echo "  install       - Install library and headers system-wide"
 	@echo "  help          - Show this help"

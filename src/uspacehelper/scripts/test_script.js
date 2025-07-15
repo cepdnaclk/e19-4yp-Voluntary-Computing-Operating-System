@@ -41,4 +41,4 @@ setTimeout(testMemory, 1000);
 setTimeout(testCPU, 3000);
 
 // Keep process alive
-setInterval(() => {}, 1000);
+//setInterval(() => {}, 1000);
