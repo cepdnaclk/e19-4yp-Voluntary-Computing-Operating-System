@@ -7,6 +7,12 @@
 #include "volcom_sysinfo/volcom_sysinfo.h"
 #include "volcom_rcsmngr/volcom_rcsmngr.h"
 
+// Function declarations
+void open_file(char *filename);
+void configure_by_cmd(struct config_s *config);
+int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path, const char *data_point);
+void process_data_stream(struct volcom_rcsmngr_s *manager, const char *script_path);
+
 void open_file(char *filename) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
@@ -45,11 +51,19 @@ void configure_by_cmd(struct config_s *config) {
                 printf("%s\n", arg);
                 if (matched == 2) {
                     if (strcmp(key, "memory") == 0) {
-                        printf("%d Mb of memory allocated for volcom\n", value);
+                        config->mem_config.allocated_memory_size_max = value * 1024; 
+                        config->mem_config.allocated_memory_size_high = (value * 1024) / 2; 
+                        printf("%d MB of memory allocated for volcom (max: %lu KB, high: %lu KB)\n", 
+                               value, config->mem_config.allocated_memory_size_max, 
+                               config->mem_config.allocated_memory_size_high);
                     } else if (strcmp(key, "cpu") == 0) {
-                        printf("%d cores allocated for volcom\n", value);
+                        config->cpu_config.allocated_logical_processors = value;
+                        config->cpu_config.allocated_cpu_share = 1024; // Default CPU share
+                        printf("%d cores allocated for volcom (CPU share: %d)\n", 
+                               value, config->cpu_config.allocated_cpu_share);
                     } else if (strcmp(key, "gpu") == 0) {
-                        printf("%d Mb of gpu memory allocated for volcom\n", value);
+                        // GPU configuration would go here
+                        printf("%d MB of GPU memory allocated for volcom\n", value);
                     } else {
                         printf("Invalid configuration. Use `help` for usage information.\n");
                     }
@@ -86,6 +100,61 @@ void configure_by_cmd(struct config_s *config) {
                 }
             } else if (strcmp(input, "get") == 0) {
                 printf("Please specify what to get: memory, cpu, cpu_usage, or gpu.\n");
+            } else if (strcmp(input, "process") == 0) {
+                printf("Starting data stream processing demo...\n");
+                
+                // Initialize resource manager for interactive processing
+                struct volcom_rcsmngr_s interactive_manager;
+                if (volcom_rcsmngr_init(&interactive_manager, "volcom_interactive") != 0) {
+                    printf("Failed to initialize resource manager for processing\n");
+                } else {
+                    if (volcom_create_main_cgroup(&interactive_manager, *config) != 0) {
+                        printf("Failed to create main cgroup for processing\n");
+                    } else {
+                        // Process the data stream
+                        process_data_stream(&interactive_manager, "./scripts/data_processor.js");
+                        
+                        // Cleanup
+                        volcom_delete_main_cgroup(&interactive_manager);
+                    }
+                    volcom_rcsmngr_cleanup(&interactive_manager);
+                }
+            } else if (strncmp(input, "process ", 8) == 0) {
+                char *data_point = input + 8;
+                printf("Processing single data point: %s\n", data_point);
+                
+                // Initialize resource manager for single processing
+                struct volcom_rcsmngr_s single_manager;
+                if (volcom_rcsmngr_init(&single_manager, "volcom_single") != 0) {
+                    printf("Failed to initialize resource manager for processing\n");
+                } else {
+                    if (volcom_create_main_cgroup(&single_manager, *config) != 0) {
+                        printf("Failed to create main cgroup for processing\n");
+                    } else {
+                        // Process single data point
+                        int result = run_node_in_cgroup(&single_manager, "SingleProcessor", 
+                                                       "./scripts/data_processor.js", data_point);
+                        if (result == 0) {
+                            printf("✓ Data point processed successfully\n");
+                        } else {
+                            printf("✗ Data point processing failed\n");
+                        }
+                        
+                        // Cleanup
+                        volcom_delete_main_cgroup(&single_manager);
+                    }
+                    volcom_rcsmngr_cleanup(&single_manager);
+                }
+            } else if (strcmp(input, "show_config") == 0) {
+                printf("Current Configuration:\n");
+                print_config(*config);
+            } else if (strncmp(input, "save_config ", 12) == 0) {
+                char *filename = input + 12;
+                if (save_config(filename, *config) == 0) {
+                    printf("Configuration saved to %s\n", filename);
+                } else {
+                    printf("Failed to save configuration to %s\n", filename);
+                }
             } else if (strcmp(input, "help") == 0) {
 
                 open_file("./other/help.txt");
@@ -100,19 +169,19 @@ void configure_by_cmd(struct config_s *config) {
         }
 }
 
-void run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path) {
+int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path, const char *data_point) {
 
     pid_t pid = fork();
 
     if (pid < 0) {
         perror("fork failed");
-        return;
+        return -1;
     }
 
     if (pid == 0) {
-        // Child process - execute Node.js script
-        printf("Child process %d starting Node.js task: %s\n", getpid(), task_name);
-        execlp("node", "node", script_path, NULL);
+        // Child process - execute Node.js script with data point as argument
+        printf("Child process %d starting Node.js task: %s with data: %s\n", getpid(), task_name, data_point);
+        execlp("node", "node", script_path, data_point, NULL);
         perror("execlp failed - Node.js not found or script error");
         exit(1);
     } else {
@@ -132,11 +201,69 @@ void run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name,
         waitpid(pid, &status, 0);
         
         if (WIFEXITED(status)) {
-            printf("Task '%s' completed with exit code %d\n", task_name, WEXITSTATUS(status));
+            int exit_code = WEXITSTATUS(status);
+            printf("Task '%s' completed with exit code %d\n", task_name, exit_code);
+            return exit_code;
         } else if (WIFSIGNALED(status)) {
             printf("Task '%s' terminated by signal %d\n", task_name, WTERMSIG(status));
+            return -1;
         }
+        
+        return 0;
     }
+}
+
+// Function to process streaming data points
+void process_data_stream(struct volcom_rcsmngr_s *manager, const char *script_path) {
+    
+    const char *data_points[] = {
+        "{\"id\":\"sensor_001\", \"type\":\"sensor\", \"value\":75}",
+        "{\"id\":\"calc_001\", \"type\":\"calculation\", \"value\":8}",
+        "{\"id\":\"sensor_002\", \"type\":\"sensor\", \"value\":120}",
+        "{\"id\":\"calc_002\", \"type\":\"calculation\", \"value\":5}",
+        "{\"id\":\"sensor_003\", \"type\":\"sensor\", \"value\":45}",
+        "{\"id\":\"calc_003\", \"type\":\"calculation\", \"value\":10}",
+        NULL  // End marker
+    };
+    
+    printf("\n=== Starting Data Stream Processing ===\n");
+    printf("Script: %s\n", script_path);
+    printf("Processing data points in cgroup: %s\n\n", manager->main_cgroup.name);
+    
+    int total_processed = 0;
+    int successful = 0;
+    int failed = 0;
+    
+    for (int i = 0; data_points[i] != NULL; i++) {
+        printf("--- Processing Data Point %d ---\n", i + 1);
+        printf("Data: %s\n", data_points[i]);
+        
+        char task_name[64];
+        snprintf(task_name, sizeof(task_name), "DataProcessor_%d", i + 1);
+        
+        int result = run_node_in_cgroup(manager, task_name, script_path, data_points[i]);
+        
+        if (result == 0) {
+            successful++;
+            printf("Data point %d processed successfully\n", i + 1);
+        } else {
+            failed++;
+            printf("Data point %d processing failed (exit code: %d)\n", i + 1, result);
+        }
+        
+        total_processed++;
+        
+        printf("Waiting before next data point...\n");
+        sleep(1);
+        printf("\n");
+    }
+    
+    printf("=== Data Stream Processing Summary ===\n");
+    printf("Total data points: %d\n", total_processed);
+    printf("Successful: %d\n", successful);
+    printf("Failed: %d\n", failed);
+    printf("Success rate: %.1f%%\n", total_processed > 0 ? (successful * 100.0 / total_processed) : 0.0);
+    printf("======================================\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -167,7 +294,8 @@ int main(int argc, char *argv[]) {
 
         volcom_print_cgroup_info(&manager);
 
-        run_node_in_cgroup(&manager, "Node.js Task", "./scripts/test_script.js");
+
+        process_data_stream(&manager, "./scripts/data_processor.js");
 
         //Cleanup
         volcom_delete_main_cgroup(&manager);
