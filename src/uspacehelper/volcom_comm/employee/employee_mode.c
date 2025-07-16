@@ -13,12 +13,16 @@
 #include "employee_mode.h"
 #include "task_receiver.h" 
 #include "send_result.h"
+#include "task_buffer.h"
 
 #define BROADCAST_INTERVAL 5              // seconds
 #define RESOURCE_THRESHOLD_PERCENT 80.0   // Max usage before stopping broadcast
 
+
 static volatile bool keep_running = true;
 static pthread_t broadcaster_thread;
+static pthread_t worker_thread;
+static TaskBuffer task_buffer;
 
 void sigint_handler(int sig) {
     (void)sig;
@@ -83,17 +87,41 @@ void* broadcast_loop(void* arg) {
 }
 
 
+
+void* worker_loop(void* arg) {
+    (void)arg;
+    while (keep_running) {
+        Task task;
+        if (task_buffer_dequeue(&task_buffer, &task)) {
+            // Process the task (simulate processing, or call your real logic)
+            printf("[Worker] Processing task: %s\n", task.file_path);
+            // TODO: Add your actual processing logic here
+            // For now, just echo back the file as result
+            send_output_to_employer(task.client_fd, task.file_path);
+            close(task.client_fd);
+        }
+    }
+    return NULL;
+}
+
 void run_employee_mode() {
     printf("[Employee] Monitoring system and broadcasting availability...\n");
 
     signal(SIGINT, sigint_handler);  // Graceful Ctrl+C exit
+
+    task_buffer_init(&task_buffer);
 
     if (pthread_create(&broadcaster_thread, NULL, broadcast_loop, NULL) != 0) {
         perror("Failed to create broadcaster thread");
         return;
     }
 
-    printf("[Employee] Ready to accept connection request...\n");
+    if (pthread_create(&worker_thread, NULL, worker_loop, NULL) != 0) {
+        perror("Failed to create worker thread");
+        return;
+    }
+
+    printf("[Employee] Ready to accept connection requests...\n");
 
     int server_fd = start_tcp_server(12345);
     if (server_fd < 0) {
@@ -117,32 +145,29 @@ void run_employee_mode() {
         if (mem_percent < RESOURCE_THRESHOLD_PERCENT) {
             char accept_msg[] = "ACCEPT";
             send(client_fd, accept_msg, strlen(accept_msg), 0);
-            printf("[Employee] Connection Accepted. Stopping broadcast...\n");
-
-            keep_running = false;
-            pthread_cancel(broadcaster_thread);
-            close(server_fd);  // Only server FD is closed; client remains open
+            printf("[Employee] Connection Accepted.\n");
 
             // Receive task (also extracts original filename from header)
             char *received_file = handle_task_receive(client_fd, employer_ip);
             if (!received_file) {
                 printf("[Employee] Failed to receive file.\n");
                 close(client_fd);
-                break;
+                continue;
             }
 
-            //add execution logic later using the file_path and return the path for result. currently use this
-            const char *result_path ="employee/result_folder/result_178456985_192_168_8_103_README.bin";
-
-
-            // Send result file back based on original filename and employer IP
-            send_output_to_employer(client_fd, 
-                result_path
-            );
+            // Prepare task struct
+            Task task;
+            strncpy(task.file_path, received_file, sizeof(task.file_path)-1);
+            task.file_path[sizeof(task.file_path)-1] = '\0';
+            strncpy(task.employer_ip, employer_ip, sizeof(task.employer_ip)-1);
+            task.employer_ip[sizeof(task.employer_ip)-1] = '\0';
+            task.client_fd = client_fd;
+            // TODO: Fill task.meta with metadata if needed
 
             free(received_file);
-            close(client_fd);
-            break;
+
+            // Enqueue task
+            task_buffer_enqueue(&task_buffer, &task);
 
         } else {
             char reject_msg[] = "REJECT";
@@ -153,4 +178,5 @@ void run_employee_mode() {
     }
 
     pthread_join(broadcaster_thread, NULL);
+    pthread_join(worker_thread, NULL);
 }
