@@ -12,15 +12,51 @@
 #include "select_employee.h"
 #include "send_task.h"
 
+// Forward declaration for new send function
+int send_task_to_employee_with_file(const char *ip, const char *filepath);
+#include <dirent.h>
+#include <sys/types.h>
+
+#define CHUNKED_SET_PATH "/home/geeth99/Desktop/chuncked_set"
+#define MAX_CHUNKS 1024
+#define MAX_FILENAME_LEN 256
+#include <dirent.h>
+#include <sys/types.h>
+
 #define PORT 9876
 #define BUFFER_SIZE 2048
 #define COLLECTION_TIMEOUT 5       // Time to wait after first employee is found
 #define STALE_THRESHOLD 15
 
-static char selected_ip[64] = "";
 
-const char* get_selected_employee_ip() {
-    return selected_ip;
+
+
+
+
+char chunk_files[MAX_CHUNKS][MAX_FILENAME_LEN];
+int num_chunks = 0;
+
+void scan_chunked_set() {
+    DIR *dir;
+    struct dirent *entry;
+
+    num_chunks = 0;
+    dir = opendir(CHUNKED_SET_PATH);
+    if (!dir) {
+        perror("[Employer] Failed to open chuncked_set directory");
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL && num_chunks < MAX_CHUNKS) {
+        if (entry->d_type == DT_REG) { // Only regular files
+            strncpy(chunk_files[num_chunks], entry->d_name, MAX_FILENAME_LEN - 1);
+            chunk_files[num_chunks][MAX_FILENAME_LEN - 1] = '\0';
+            num_chunks++;
+        }
+    }
+    closedir(dir);
+
+    printf("[Employer] Found %d chunk files in chuncked_set.\n", num_chunks);
 }
 
 void run_employer_mode() {
@@ -28,6 +64,9 @@ void run_employer_mode() {
     struct sockaddr_in server_addr, client_addr;
     socklen_t addr_len = sizeof(client_addr);
     char buffer[BUFFER_SIZE];
+
+    // Scan the chunked_set directory for chunk files
+    scan_chunked_set();
 
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         perror("Socket creation failed");
@@ -107,36 +146,63 @@ void run_employer_mode() {
     printf("\n[Employer] Finalizing employee list...\n");
     cleanup_old_employees(STALE_THRESHOLD);
 
-while (1) {
+    // The chunk_files[] array now contains all chunk files in chuncked_set
+    // Assign these to employees in round robin fashion
+
     EmployeeNodeWrapper *list = get_candidate_list();
     if (!list) {
         printf("[!] No active employees found.\n");
         return;
     }
 
-    char *chosen_ip = select_employee_ip(list);
-    if (!chosen_ip) {
-        printf("[!] No valid employee selected. Exiting.\n");
+    // Count employees
+    int employee_count = 0;
+    EmployeeNodeWrapper *cur = list;
+    while (cur) {
+        employee_count++;
+        cur = cur->next;
+    }
+    if (employee_count == 0) {
+        printf("[!] No employees available for task assignment.\n");
         return;
     }
 
-    printf("[Employer] Attempting to send task to %s...\n", chosen_ip);
-    
-    int success = send_task_to_employee(chosen_ip);
-    free(chosen_ip);
+    // Build array of employee IPs
+    char **employee_ips = malloc(employee_count * sizeof(char*));
+    cur = list;
+    int idx = 0;
 
-    if (success) {
-        printf("[✔] Task executed and result received successfully.\n");
-        break;  // Done
-    } else {
-        printf("\n[!] Task failed. Either employee rejected, connection failed, or no result was received in time.\n");
-        printf("[!] You may try offloading the task to another available employee.\n");
-        sleep(1);  // small delay for usability
-        continue;  // Retry loop
+    while (cur) {
+        employee_ips[idx] = strdup(cur->data.ip); // Use correct struct member from EmployeeNodeWrapper
+        idx++;
+        cur = cur->next;
     }
-}
 
-}
+    printf("[Employer] Assigning %d chunk files to %d employees (round robin)\n", num_chunks, employee_count);
 
+    for (int i = 0; i < num_chunks; ++i) {
+        int emp_idx = i % employee_count;
+        char *emp_ip = employee_ips[emp_idx];
+
+        // Build full path to chunk file
+        char chunk_path[512];
+        snprintf(chunk_path, sizeof(chunk_path), "%s/%s", CHUNKED_SET_PATH, chunk_files[i]);
+
+        printf("[Employer] Sending chunk %s to employee %s\n", chunk_files[i], emp_ip);
+
+        int success = send_task_to_employee_with_file(emp_ip, chunk_path);
+        if (success) {
+            printf("[✔] Chunk %s sent and result received from %s.\n", chunk_files[i], emp_ip);
+        } else {
+            printf("[!] Failed to send chunk %s to %s.\n", chunk_files[i], emp_ip);
+        }
+    }
+
+    // Free employee IPs
+    for (int i = 0; i < employee_count; ++i) {
+        free(employee_ips[i]);
+    }
+    free(employee_ips);
+}
 
 //store sent tasks and delete them when result is received

@@ -10,6 +10,7 @@
 #include <time.h>
 #include <libgen.h> // for basename()
 #include "send_task.h"
+#include "cJSON.h"
 
 #define EMPLOYEE_PORT 12345
 #define BUFFER_SIZE 4096
@@ -250,4 +251,91 @@ int receive_task_result(int sockfd, const char *ip, const char *original_filenam
     fclose(fp);
     printf("[send_task] Result received: %zu bytes → saved to %s\n", total, result_filename);
     return (total > 0);
+}
+
+int send_task_to_employee_with_file(const char *ip, const char *filepath) {
+    struct sockaddr_in addr;
+    int sockfd;
+    char response[32] = {0};
+
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("[send_task] Socket creation failed");
+        return 0;
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(EMPLOYEE_PORT);
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) <= 0) {
+        perror("[send_task] Invalid IP address");
+        close(sockfd);
+        return 0;
+    }
+
+    printf("[send_task] Connecting to %s...\n", ip);
+    if (connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("[send_task] Connection failed");
+        close(sockfd);
+        return 0;
+    }
+
+    // Wait for accept/reject
+    ssize_t n = recv(sockfd, response, sizeof(response) - 1, 0);
+    if (n <= 0) {
+        printf("[send_task] No response from employee.\n");
+        close(sockfd);
+        return 0;
+    }
+
+    response[n] = '\0';
+    if (strcmp(response, "REJECT") == 0) {
+        printf("[send_task] Employee rejected the task.\n");
+        close(sockfd);
+        return 0;
+    }
+
+    // Prepare JSON metadata
+    char *filename = basename((char *)filepath);
+    char task_id[64];
+    snprintf(task_id, sizeof(task_id), "task-%ld-%s", time(NULL), filename);
+
+    cJSON *meta = cJSON_CreateObject();
+    cJSON_AddStringToObject(meta, "type", "task");
+    cJSON_AddStringToObject(meta, "task_id", task_id);
+    cJSON_AddStringToObject(meta, "chunk_filename", filename);
+    cJSON_AddStringToObject(meta, "sender_id", "employer");
+    cJSON_AddStringToObject(meta, "status", "assigned");
+    cJSON_AddNumberToObject(meta, "timestamp", (double)time(NULL));
+    char *meta_str = cJSON_PrintUnformatted(meta);
+
+    // Send metadata length and metadata
+    uint32_t meta_len = htonl(strlen(meta_str));
+    if (send(sockfd, &meta_len, sizeof(meta_len), 0) != sizeof(meta_len)) {
+        perror("[send_task] Failed to send metadata length");
+        cJSON_Delete(meta);
+        free(meta_str);
+        close(sockfd);
+        return 0;
+    }
+    if (send(sockfd, meta_str, strlen(meta_str), 0) != (ssize_t)strlen(meta_str)) {
+        perror("[send_task] Failed to send metadata");
+        cJSON_Delete(meta);
+        free(meta_str);
+        close(sockfd);
+        return 0;
+    }
+    cJSON_Delete(meta);
+    free(meta_str);
+
+    // Send the file
+    int result = send_file(sockfd, filepath, ip);
+    if (result) {
+        printf("[send_task] Waiting for task result from employee...\n");
+        int recv_success = receive_task_result(sockfd, ip, filename);
+        close(sockfd);
+        return recv_success;
+    }
+
+    close(sockfd);
+    return 0;
 }
