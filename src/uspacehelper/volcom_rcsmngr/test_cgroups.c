@@ -1,9 +1,9 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/wait.h>
+
+
 #include "../volcom_sysinfo/volcom_sysinfo.h"
 #include "volcom_rcsmngr.h"
+
+#include <sys/wait.h>
 
 int main() {
     
