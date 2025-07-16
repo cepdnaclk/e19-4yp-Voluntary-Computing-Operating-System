@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include "volcom_sysinfo/volcom_sysinfo.h"
+#include "volcom_rcsmngr/volcom_rcsmngr.h"
 
 void open_file(char *filename) {
     FILE *file = fopen(filename, "r");
@@ -18,23 +22,10 @@ void open_file(char *filename) {
     fclose(file);
 }
 
-void configure_memory(struct config_s *config) {
+void configure_by_cmd(struct config_s *config) {
     
     // TODO: Implement memory configuration logic
-    printf("Memory configuration is not implemented yet.\n");
-}
-
-int main(int argc, char *argv[]) {
-    struct config_s config = {0};
-
-    if (argc == 3 && strcmp(argv[1], "--file") == 0) {
-
-        config = load_config(argv[2]);
-        print_config(config);
-
-        return 0;
-    } else {
-        while (1) {
+    while (1) {
             char *input = malloc(256);
             printf("Enter configuration (or 'q' to quit or 'menu' for menu): ");
             fgets(input, 256, stdin);
@@ -107,7 +98,85 @@ int main(int argc, char *argv[]) {
 
             free(input);
         }
+}
 
+void run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path) {
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork failed");
+        return;
+    }
+
+    if (pid == 0) {
+        // Child process - execute Node.js script
+        printf("Child process %d starting Node.js task: %s\n", getpid(), task_name);
+        execlp("node", "node", script_path, NULL);
+        perror("execlp failed - Node.js not found or script error");
+        exit(1);
+    } else {
+        // Parent process - add child to cgroup
+        printf("Created child process %d for task '%s'\n", pid, task_name);
+        
+        // Add the process to the main cgroup
+        if (volcom_add_pid_to_cgroup(manager, manager->main_cgroup.name, pid) == 0) {
+            printf("Added process %d to main cgroup '%s'\n", pid, manager->main_cgroup.name);
+        } else {
+            printf("Failed to add process %d to cgroup\n", pid);
+        }
+
+        // Wait for the child process to complete
+        int status;
+        printf("Waiting for Node.js task to complete...\n");
+        waitpid(pid, &status, 0);
+        
+        if (WIFEXITED(status)) {
+            printf("Task '%s' completed with exit code %d\n", task_name, WEXITSTATUS(status));
+        } else if (WIFSIGNALED(status)) {
+            printf("Task '%s' terminated by signal %d\n", task_name, WTERMSIG(status));
+        }
+    }
+}
+
+int main(int argc, char *argv[]) {
+
+    struct volcom_rcsmngr_s manager;
+    struct config_s config = {0};
+
+     if (getuid() != 0) {
+        printf("This programme requires root privileges. Please run with sudo.\n");
+        return 1;
+    }
+
+    if (argc == 3 && strcmp(argv[1], "--file") == 0) {
+
+        config = load_config(argv[2]);
+        print_config(config);
+
+        if (volcom_rcsmngr_init(&manager, "volcom") != 0) {
+            fprintf(stderr, "Failed to initialize resource manager\n");
+            return 1;
+        }
+
+        if (volcom_create_main_cgroup(&manager, config) != 0) {
+            fprintf(stderr, "Failed to create main cgroup\n");
+            volcom_rcsmngr_cleanup(&manager);
+            return 1;
+        }
+
+        volcom_print_cgroup_info(&manager);
+
+        run_node_in_cgroup(&manager, "Node.js Task", "./scripts/test_script.js");
+
+        //Cleanup
+        volcom_delete_main_cgroup(&manager);
+        volcom_rcsmngr_cleanup(&manager);
+
+        return 0;
+    } else {
+
+        configure_by_cmd(&config);
         return 0;
     }
 }
