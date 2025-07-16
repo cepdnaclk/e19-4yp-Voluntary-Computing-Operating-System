@@ -4,6 +4,7 @@ CFLAGS = -Wall -Wextra -pthread -I./include -I../volcom_sysinfo -I/usr/include/c
 
 # Common source files shared by both modes
 COMMON_SRC = utils/net_utils.c \
+utils/protocol.c \
              ../volcom_sysinfo/volcom_sysinfo.c
 
 # All sources needed for unified binary (employee + employer)
@@ -16,7 +17,6 @@ SRC = comm_main.c \
       employee/task_receiver.c \
       employee/send_result.c \
       employee/task_buffer.c \
-      employee/protocol.c \
       $(COMMON_SRC)
 
 

@@ -14,7 +14,7 @@
 #include "task_receiver.h" 
 #include "send_result.h"
 #include "task_buffer.h"
-#include "protocol.h"
+#include "../utils/protocol.h"
 
 #define BROADCAST_INTERVAL 5              // seconds
 #define RESOURCE_THRESHOLD_PERCENT 80.0   // Max usage before stopping broadcast

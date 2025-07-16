@@ -11,6 +11,7 @@
 #include <libgen.h> // for basename()
 #include "send_task.h"
 #include "cJSON.h"
+#include "../utils/protocol.h"
 
 #define EMPLOYEE_PORT 12345
 #define BUFFER_SIZE 4096
@@ -294,38 +295,19 @@ int send_task_to_employee_with_file(const char *ip, const char *filepath) {
         return 0;
     }
 
-    // Prepare JSON metadata
+
+    // Prepare and send JSON metadata using protocol helpers
     char *filename = basename((char *)filepath);
     char task_id[64];
     snprintf(task_id, sizeof(task_id), "task-%ld-%s", time(NULL), filename);
-
-    cJSON *meta = cJSON_CreateObject();
-    cJSON_AddStringToObject(meta, "type", "task");
-    cJSON_AddStringToObject(meta, "task_id", task_id);
-    cJSON_AddStringToObject(meta, "chunk_filename", filename);
-    cJSON_AddStringToObject(meta, "sender_id", "employer");
-    cJSON_AddStringToObject(meta, "status", "assigned");
-    cJSON_AddNumberToObject(meta, "timestamp", (double)time(NULL));
-    char *meta_str = cJSON_PrintUnformatted(meta);
-
-    // Send metadata length and metadata
-    uint32_t meta_len = htonl(strlen(meta_str));
-    if (send(sockfd, &meta_len, sizeof(meta_len), 0) != sizeof(meta_len)) {
-        perror("[send_task] Failed to send metadata length");
-        cJSON_Delete(meta);
-        free(meta_str);
-        close(sockfd);
-        return 0;
-    }
-    if (send(sockfd, meta_str, strlen(meta_str), 0) != (ssize_t)strlen(meta_str)) {
+    cJSON *meta = create_task_metadata(task_id, filename, "employer", ip, "assigned");
+    if (send_json(sockfd, meta) != PROTOCOL_OK) {
         perror("[send_task] Failed to send metadata");
         cJSON_Delete(meta);
-        free(meta_str);
         close(sockfd);
         return 0;
     }
     cJSON_Delete(meta);
-    free(meta_str);
 
     // Send the file
     int result = send_file(sockfd, filepath, ip);
