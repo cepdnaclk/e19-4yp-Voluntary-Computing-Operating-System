@@ -14,6 +14,7 @@
 #include "task_receiver.h" 
 #include "send_result.h"
 #include "task_buffer.h"
+#include "protocol.h"
 
 #define BROADCAST_INTERVAL 5              // seconds
 #define RESOURCE_THRESHOLD_PERCENT 80.0   // Max usage before stopping broadcast
@@ -147,10 +148,21 @@ void run_employee_mode() {
             send(client_fd, accept_msg, strlen(accept_msg), 0);
             printf("[Employee] Connection Accepted.\n");
 
-            // Receive task (also extracts original filename from header)
+
+            // Receive JSON metadata using protocol
+            cJSON *meta_json = NULL;
+            if (recv_json(client_fd, &meta_json) != PROTOCOL_OK) {
+                printf("[Employee] Failed to receive metadata.\n");
+                close(client_fd);
+                continue;
+            }
+            char *meta_str = cJSON_PrintUnformatted(meta_json);
+            // Receive task file (also extracts original filename from header)
             char *received_file = handle_task_receive(client_fd, employer_ip);
             if (!received_file) {
                 printf("[Employee] Failed to receive file.\n");
+                cJSON_Delete(meta_json);
+                free(meta_str);
                 close(client_fd);
                 continue;
             }
@@ -162,9 +174,12 @@ void run_employee_mode() {
             strncpy(task.employer_ip, employer_ip, sizeof(task.employer_ip)-1);
             task.employer_ip[sizeof(task.employer_ip)-1] = '\0';
             task.client_fd = client_fd;
-            // TODO: Fill task.meta with metadata if needed
+            strncpy(task.meta, meta_str, sizeof(task.meta)-1);
+            task.meta[sizeof(task.meta)-1] = '\0';
 
             free(received_file);
+            cJSON_Delete(meta_json);
+            free(meta_str);
 
             // Enqueue task
             task_buffer_enqueue(&task_buffer, &task);

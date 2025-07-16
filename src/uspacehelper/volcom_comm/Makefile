@@ -16,6 +16,7 @@ SRC = comm_main.c \
       employee/task_receiver.c \
       employee/send_result.c \
       employee/task_buffer.c \
+      employee/protocol.c \
       $(COMMON_SRC)
 
 
