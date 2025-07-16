@@ -17,7 +17,7 @@ int send_task_to_employee_with_file(const char *ip, const char *filepath);
 #include <dirent.h>
 #include <sys/types.h>
 
-#define CHUNKED_SET_PATH "/home/geeth99/Desktop/chuncked_set"
+#define CHUNKED_SET_PATH "/home/dasun/Projects/e19-4yp-Voluntary-Computing-Operating-System/src/uspacehelper/scripts"
 #define MAX_CHUNKS 1024
 #define MAX_FILENAME_LEN 256
 #include <dirent.h>

@@ -74,7 +74,7 @@ int send_file(int sockfd, const char *filepath, const char *ip) {
 
     // Send + copy file content
     while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, fp)) > 0) {
-        if (send(sockfd, buffer, bytes_read, 0) != bytes_read) {
+        if (send(sockfd, buffer, bytes_read, 0) != (ssize_t)bytes_read) {
             perror("[send_task] Failed to send file");
             fclose(fp);
             fclose(temp_copy_fp);
