@@ -3,6 +3,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 protocol_status_t send_json(int sockfd, cJSON *json) {
     char *json_str = cJSON_PrintUnformatted(json);

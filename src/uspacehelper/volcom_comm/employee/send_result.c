@@ -62,7 +62,7 @@ void send_output_to_employer(int client_fd, const char *result_file_path) {
     size_t total_sent = 0;
     size_t bytes;
     while ((bytes = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
-        if (send(client_fd, buffer, bytes, 0) != bytes) {
+        if ((size_t)send(client_fd, buffer, bytes, 0) != (size_t)bytes) {
             perror("[send_result] Failed to send result file");
             break;
         }
