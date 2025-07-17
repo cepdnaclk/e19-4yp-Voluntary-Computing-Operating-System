@@ -1,7 +1,16 @@
 #include "volcom_net.h"
+#include <net/if.h>
 
 static int sockfd = -1;
 static struct sockaddr_in broadcast_addr;
+
+// TCP server state
+static int tcp_server_sockfd = -1;
+static struct sockaddr_in tcp_server_addr;
+
+// TCP client state
+static int tcp_client_sockfd = -1;
+static struct sockaddr_in tcp_client_addr;
 
 bool udp_broadcaster_init(struct udp_config_s *config){
 
@@ -65,18 +74,259 @@ void udp_broadcaster_cleanup() {
 }
 
 void get_local_ip(char* buffer, size_t size) {
-    
     struct ifaddrs *ifaddr, *ifa;
-    getifaddrs(&ifaddr);
+    
+    if (getifaddrs(&ifaddr) == -1) {
+        perror("getifaddrs");
+        strncpy(buffer, "127.0.0.1", size - 1);
+        buffer[size - 1] = '\0';
+        return;
+    }
 
-    for (ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr &&
-            ifa->ifa_addr->sa_family == AF_INET &&
-            !(ifa->ifa_flags & IFF_LOOPBACK)) {
-            getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in), buffer, size, NULL, 0, NI_NUMERICHOST);
-            break;
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL) continue;
+        
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            struct sockaddr_in* addr_in = (struct sockaddr_in*)ifa->ifa_addr;
+            char* ip_str = inet_ntoa(addr_in->sin_addr);
+            
+            // Skip loopback (127.x.x.x)
+            if (strncmp(ip_str, "127.", 4) != 0) {
+                strncpy(buffer, ip_str, size - 1);
+                buffer[size - 1] = '\0';
+                freeifaddrs(ifaddr);
+                return;
+            }
         }
     }
 
+    // Fallback to localhost if no other interface found
+    strncpy(buffer, "127.0.0.1", size - 1);
+    buffer[size - 1] = '\0';
     freeifaddrs(ifaddr);
+}
+
+// TCP Server Functions
+bool tcp_server_init(struct tcp_config_s *config) {
+
+    if (!config) {
+        fprintf(stderr, "Invalid TCP config\n");
+        return false;
+    }
+
+    if ((tcp_server_sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("TCP server socket creation failed");
+        return false;
+    }
+
+    // Allow socket reuse
+    int reuse = 1;
+    if (setsockopt(tcp_server_sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse))) {
+        perror("setsockopt (SO_REUSEADDR) failed");
+        close(tcp_server_sockfd);
+        tcp_server_sockfd = -1;
+        return false;
+    }
+
+    memset(&tcp_server_addr, 0, sizeof(tcp_server_addr));
+    tcp_server_addr.sin_family = AF_INET;
+    tcp_server_addr.sin_port = htons(config->port);
+    
+    if (inet_pton(AF_INET, config->ip, &tcp_server_addr.sin_addr) <= 0) {
+        perror("inet_pton failed for TCP server");
+        close(tcp_server_sockfd);
+        tcp_server_sockfd = -1;
+        return false;
+    }
+
+    if (bind(tcp_server_sockfd, (struct sockaddr *)&tcp_server_addr, sizeof(tcp_server_addr)) < 0) {
+        perror("TCP server bind failed");
+        close(tcp_server_sockfd);
+        tcp_server_sockfd = -1;
+        return false;
+    }
+
+    if (listen(tcp_server_sockfd, config->max_connections) < 0) {
+        perror("TCP server listen failed");
+        close(tcp_server_sockfd);
+        tcp_server_sockfd = -1;
+        return false;
+    }
+
+    printf("TCP server initialized on port %d, IP %s, max connections: %d\n", 
+           config->port, config->ip, config->max_connections);
+    return true;
+}
+
+int tcp_server_accept_connection() {
+
+    if (tcp_server_sockfd < 0) {
+        fprintf(stderr, "TCP server not initialized\n");
+        return -1;
+    }
+
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+    
+    int client_fd = accept(tcp_server_sockfd, (struct sockaddr *)&client_addr, &addr_len);
+    if (client_fd < 0) {
+        perror("TCP server accept failed");
+        return -1;
+    }
+
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+    printf("TCP server accepted connection from %s:%d\n", client_ip, ntohs(client_addr.sin_port));
+
+    return client_fd;
+}
+
+bool tcp_server_send_message(int client_fd, const char* message) {
+
+    if (client_fd < 0 || !message) {
+        fprintf(stderr, "Invalid client fd or message\n");
+        return false;
+    }
+
+    size_t message_len = strlen(message);
+    ssize_t sent_bytes = send(client_fd, message, message_len, 0);
+    
+    if (sent_bytes < 0) {
+        perror("TCP server send failed");
+        return false;
+    }
+
+    if ((size_t)sent_bytes != message_len) {
+        fprintf(stderr, "TCP server partial send: %zd/%zu bytes\n", sent_bytes, message_len);
+        return false;
+    }
+
+    return true;
+}
+
+ssize_t tcp_server_receive_message(int client_fd, char* buffer, size_t buffer_size) {
+
+    if (client_fd < 0 || !buffer || buffer_size == 0) {
+        fprintf(stderr, "Invalid parameters for TCP server receive\n");
+        return -1;
+    }
+
+    ssize_t received_bytes = recv(client_fd, buffer, buffer_size - 1, 0);
+    if (received_bytes < 0) {
+        perror("TCP server receive failed");
+        return -1;
+    }
+
+    if (received_bytes == 0) {
+        printf("TCP server: Client disconnected\n");
+        return 0;
+    }
+
+    buffer[received_bytes] = '\0';  // Null-terminate
+    return received_bytes;
+}
+
+void tcp_server_cleanup() {
+
+    if (tcp_server_sockfd >= 0) {
+        close(tcp_server_sockfd);
+        tcp_server_sockfd = -1;
+    }
+}
+
+// TCP Client Functions
+bool tcp_client_init(struct tcp_config_s *config) {
+
+    if (!config) {
+        fprintf(stderr, "Invalid TCP client config\n");
+        return false;
+    }
+
+    if ((tcp_client_sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("TCP client socket creation failed");
+        return false;
+    }
+
+    memset(&tcp_client_addr, 0, sizeof(tcp_client_addr));
+    tcp_client_addr.sin_family = AF_INET;
+    tcp_client_addr.sin_port = htons(config->port);
+    
+    if (inet_pton(AF_INET, config->ip, &tcp_client_addr.sin_addr) <= 0) {
+        perror("inet_pton failed for TCP client");
+        close(tcp_client_sockfd);
+        tcp_client_sockfd = -1;
+        return false;
+    }
+
+    printf("TCP client initialized for %s:%d\n", config->ip, config->port);
+    return true;
+}
+
+bool tcp_client_connect() {
+
+    if (tcp_client_sockfd < 0) {
+        fprintf(stderr, "TCP client not initialized\n");
+        return false;
+    }
+
+    if (connect(tcp_client_sockfd, (struct sockaddr *)&tcp_client_addr, sizeof(tcp_client_addr)) < 0) {
+        perror("TCP client connect failed");
+        return false;
+    }
+
+    printf("TCP client connected successfully\n");
+    return true;
+}
+
+bool tcp_client_send_message(const char* message) {
+    
+    if (tcp_client_sockfd < 0 || !message) {
+        fprintf(stderr, "TCP client not connected or invalid message\n");
+        return false;
+    }
+
+    size_t message_len = strlen(message);
+    ssize_t sent_bytes = send(tcp_client_sockfd, message, message_len, 0);
+    
+    if (sent_bytes < 0) {
+        perror("TCP client send failed");
+        return false;
+    }
+
+    if ((size_t)sent_bytes != message_len) {
+        fprintf(stderr, "TCP client partial send: %zd/%zu bytes\n", sent_bytes, message_len);
+        return false;
+    }
+
+    return true;
+}
+
+ssize_t tcp_client_receive_message(char* buffer, size_t buffer_size) {
+
+    if (tcp_client_sockfd < 0 || !buffer || buffer_size == 0) {
+        fprintf(stderr, "Invalid parameters for TCP client receive\n");
+        return -1;
+    }
+
+    ssize_t received_bytes = recv(tcp_client_sockfd, buffer, buffer_size - 1, 0);
+    if (received_bytes < 0) {
+        perror("TCP client receive failed");
+        return -1;
+    }
+
+    if (received_bytes == 0) {
+        printf("TCP client: Server disconnected\n");
+        return 0;
+    }
+
+    buffer[received_bytes] = '\0';  // Null-terminate
+    return received_bytes;
+}
+
+void tcp_client_cleanup() {
+    
+    if (tcp_client_sockfd >= 0) {
+        close(tcp_client_sockfd);
+        tcp_client_sockfd = -1;
+    }
 }
