@@ -26,6 +26,10 @@ typedef struct {
 void task_buffer_init(TaskBuffer *buf);
 bool task_buffer_enqueue(TaskBuffer *buf, Task *task);
 bool task_buffer_dequeue(TaskBuffer *buf, Task *task_out);
+bool task_buffer_dequeue_timeout(TaskBuffer *buf, Task *task_out, int timeout_ms);
 int task_buffer_size(TaskBuffer *buf);
+int task_buffer_capacity(TaskBuffer *buf);
+double task_buffer_usage_percentage(TaskBuffer *buf);
+void task_buffer_destroy(TaskBuffer *buf);
 
 #endif // TASK_BUFFER_H
