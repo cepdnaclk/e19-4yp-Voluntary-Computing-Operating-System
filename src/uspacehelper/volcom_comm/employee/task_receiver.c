@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <sys/socket.h>
 #include "task_receiver.h"
 
 #define BUFFER_SIZE 4096
