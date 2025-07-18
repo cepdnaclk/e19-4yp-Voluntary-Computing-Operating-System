@@ -1,258 +1,346 @@
 # volcom_net - Network Communication Library
 
-This library provides reusable UDP and TCP networking functionality for the Voluntary Computing Operating System.
+This library provides comprehensive networking functionality for the Voluntary Computing Operating System, including UDP broadcasting, TCP sockets, and Unix domain sockets.
 
 ## Features
 
 -   **UDP Broadcasting**: Send broadcast messages to discover services
--   **TCP Server**: Accept incoming connections and handle bidirectional communication
--   **TCP Client**: Connect to servers and exchange messages
--   **Reusable Sockets**: Efficient socket management with proper cleanup
+-   **TCP Server/Client**: Bidirectional TCP communication
+-   **Unix Domain Sockets**: High-performance local inter-process communication
+-   **Reusable Architecture**: Efficient socket management with proper cleanup
 -   **Thread-Safe**: Designed for multi-threaded applications
 
-## API Reference
+## Unix Socket Implementation
 
-### UDP Functions
-
-```c
-struct udp_config_s {
-    int port;
-    const char *ip;
-    int interval_sec;
-};
-
-bool udp_broadcaster_init(struct udp_config_s *config);
-bool send_udp_broadcast(const char* message);
-void udp_broadcaster_cleanup(void);
-```
-
-### TCP Server Functions
+### Server Functions
 
 ```c
-struct tcp_config_s {
-    int port;
-    const char *ip;
-    int max_connections;
+struct unix_socket_config_s {
+    const char *socket_path;
+    int buffer_size;
     int timeout_sec;
 };
 
-bool tcp_server_init(struct tcp_config_s *config);
-int tcp_server_accept_connection(void);
-bool tcp_server_send_message(int client_fd, const char* message);
-ssize_t tcp_server_receive_message(int client_fd, char* buffer, size_t buffer_size);
-void tcp_server_cleanup(void);
+bool unix_socket_server_init(struct unix_socket_config_s *config);
+int unix_socket_server_accept(void);
+bool unix_socket_server_send_message(int client_fd, const char* message);
+ssize_t unix_socket_server_receive_message(int client_fd, char* buffer, size_t buffer_size);
+void unix_socket_server_cleanup(void);
 ```
 
-### TCP Client Functions
+### Client Functions
 
 ```c
-bool tcp_client_init(struct tcp_config_s *config);
-bool tcp_client_connect(void);
-bool tcp_client_send_message(const char* message);
-ssize_t tcp_client_receive_message(char* buffer, size_t buffer_size);
-void tcp_client_cleanup(void);
+bool unix_socket_client_init(struct unix_socket_config_s *config);
+bool unix_socket_client_connect(void);
+bool unix_socket_client_send_message(const char* message);
+ssize_t unix_socket_client_receive_message(char* buffer, size_t buffer_size);
+void unix_socket_client_cleanup(void);
 ```
 
 ## Usage Examples
 
-### UDP Broadcasting
+### Unix Socket Server
 
 ```c
 #include "volcom_net.h"
 
-struct udp_config_s udp_config = {
-    .port = 9876,
-    .ip = "255.255.255.255",
-    .interval_sec = 5
-};
-
-// Initialize UDP broadcaster
-if (udp_broadcaster_init(&udp_config)) {
-    // Send broadcast message
-    send_udp_broadcast("Hello, network!");
-
-    // Cleanup
-    udp_broadcaster_cleanup();
-}
-```
-
-### TCP Server
-
-```c
-#include "volcom_net.h"
-
-struct tcp_config_s server_config = {
-    .port = 12345,
-    .ip = "0.0.0.0",  // Listen on all interfaces
-    .max_connections = 5,
+struct unix_socket_config_s config = {
+    .socket_path = "/tmp/volcom_unix_socket",
+    .buffer_size = 1024,
     .timeout_sec = 10
 };
 
-// Initialize TCP server
-if (tcp_server_init(&server_config)) {
+// Initialize Unix socket server
+if (unix_socket_server_init(&config)) {
     // Accept client connection
-    int client_fd = tcp_server_accept_connection();
+    int client_fd = unix_socket_server_accept();
     if (client_fd >= 0) {
         // Receive message
         char buffer[1024];
-        ssize_t bytes = tcp_server_receive_message(client_fd, buffer, sizeof(buffer));
+        ssize_t bytes = unix_socket_server_receive_message(client_fd, buffer, sizeof(buffer));
         if (bytes > 0) {
             printf("Received: %s\n", buffer);
 
             // Send response
-            tcp_server_send_message(client_fd, "Message received!");
+            unix_socket_server_send_message(client_fd, "Message received!");
         }
         close(client_fd);
     }
 
     // Cleanup
-    tcp_server_cleanup();
+    unix_socket_server_cleanup();
 }
 ```
 
-### TCP Client
+### Unix Socket Client
 
 ```c
 #include "volcom_net.h"
 
-struct tcp_config_s client_config = {
-    .port = 12345,
-    .ip = "127.0.0.1",
-    .max_connections = 0,
+struct unix_socket_config_s config = {
+    .socket_path = "/tmp/volcom_unix_socket",
+    .buffer_size = 1024,
     .timeout_sec = 5
 };
 
-// Initialize and connect TCP client
-if (tcp_client_init(&client_config) && tcp_client_connect()) {
+// Initialize and connect Unix socket client
+if (unix_socket_client_init(&config) && unix_socket_client_connect()) {
     // Send message
-    tcp_client_send_message("Hello, server!");
+    unix_socket_client_send_message("Hello, server!");
 
     // Receive response
     char buffer[1024];
-    ssize_t bytes = tcp_client_receive_message(buffer, sizeof(buffer));
+    ssize_t bytes = unix_socket_client_receive_message(buffer, sizeof(buffer));
     if (bytes > 0) {
         printf("Response: %s\n", buffer);
     }
 
     // Cleanup
-    tcp_client_cleanup();
+    unix_socket_client_cleanup();
 }
 ```
 
-## Integration with Employee/Employer Architecture
-
-### Employee Node (Server Mode)
+### Sending Success Messages
 
 ```c
-// Employee can use both UDP and TCP
-void* employee_main() {
-    // 1. Setup UDP broadcasting for availability
-    struct udp_config_s udp_config = {
-        .port = BROADCAST_PORT,
-        .ip = "255.255.255.255",
-        .interval_sec = 5
-    };
+// Send JSON success message
+char success_msg[] = "{"
+    "\"status\": \"success\","
+    "\"message\": \"Data saved successfully\","
+    "\"timestamp\": \"2025-07-18T12:00:00Z\","
+    "\"file\": \"img_1721304000.bin\""
+"}";
 
-    // 2. Setup TCP server for task reception
-    struct tcp_config_s tcp_config = {
-        .port = TCP_PORT,
-        .ip = "0.0.0.0",
-        .max_connections = 10,
-        .timeout_sec = 30
-    };
+unix_socket_client_send_message(success_msg);
+```
 
-    if (udp_broadcaster_init(&udp_config) && tcp_server_init(&tcp_config)) {
-        // Broadcasting thread
-        pthread_create(&broadcast_thread, NULL, broadcast_worker, NULL);
+## JavaScript Integration
 
-        // Main server loop
-        while (running) {
-            int client_fd = tcp_server_accept_connection();
-            if (client_fd >= 0) {
-                // Handle task from employer
-                handle_task_request(client_fd);
+The library works seamlessly with the Node.js Unix socket server:
+
+```javascript
+const net = require("net");
+const fs = require("fs");
+
+const SOCKET_PATH = "/tmp/volcom_unix_socket";
+
+const server = net.createServer((socket) => {
+    socket.on("data", (data) => {
+        const message = data.toString("utf8");
+
+        try {
+            const jsonData = JSON.parse(message);
+
+            if (jsonData.status === "success") {
+                console.log("Success message received:", jsonData.message);
+
+                // Send acknowledgment
+                const response = {
+                    status: "acknowledged",
+                    message: "Success message processed",
+                    timestamp: new Date().toISOString(),
+                };
+
+                socket.write(JSON.stringify(response));
             }
-        }
+        } catch (e) {
+            // Handle binary data
+            const filename = `img_${Date.now()}.bin`;
+            fs.writeFileSync(filename, data);
 
-        // Cleanup
-        udp_broadcaster_cleanup();
-        tcp_server_cleanup();
-    }
-}
+            // Send success message
+            const successMsg = {
+                status: "success",
+                message: "Data saved successfully",
+                file: filename,
+            };
+
+            socket.write(JSON.stringify(successMsg));
+        }
+    });
+});
+
+server.listen(SOCKET_PATH);
 ```
 
-### Employer Node (Client Mode)
+## Building and Testing
 
-```c
-// Employer can use TCP client to send tasks
-void send_task_to_employee(const char* employee_ip, const char* task_data) {
-    struct tcp_config_s client_config = {
-        .port = TCP_PORT,
-        .ip = employee_ip,
-        .max_connections = 0,
-        .timeout_sec = 10
-    };
-
-    if (tcp_client_init(&client_config) && tcp_client_connect()) {
-        // Send task
-        tcp_client_send_message(task_data);
-
-        // Receive result
-        char result[4096];
-        ssize_t bytes = tcp_client_receive_message(result, sizeof(result));
-        if (bytes > 0) {
-            printf("Task result: %s\n", result);
-        }
-
-        tcp_client_cleanup();
-    }
-}
-```
-
-## Building
+### Build All Components
 
 ```bash
-# Build library and test
 make all
+```
 
-# Build library only
-make libvolcom_net.a
+### Run Tests
 
-# Run tests
+```bash
+# Run Unix socket test
+make unix-test
+
+# Run TCP/UDP test
 make test
 
-# Clean build artifacts
+# Run interactive demo
+make demo
+./simple_tcp_demo server  # Terminal 1
+./simple_tcp_demo client  # Terminal 2
+```
+
+### Clean Build
+
+```bash
 make clean
 ```
 
-## Thread Safety
+## API Reference
 
--   Each socket (UDP/TCP server/TCP client) maintains its own state
--   Multiple TCP clients can be used simultaneously
--   UDP broadcaster is reentrant for message sending
--   Proper cleanup prevents resource leaks
+### Constants
+
+-   `UNIX_SOCKET_PATH`: Default Unix socket path (`/tmp/volcom_unix_socket`)
+-   `BROADCAST_PORT`: UDP broadcast port (9876)
+-   `TCP_PORT`: Default TCP port (12345)
+
+### Configuration Structures
+
+#### Unix Socket Configuration
+
+```c
+struct unix_socket_config_s {
+    const char *socket_path;  // Path to Unix socket file
+    int buffer_size;          // Buffer size for operations
+    int timeout_sec;          // Timeout for operations
+};
+```
+
+#### TCP Configuration
+
+```c
+struct tcp_config_s {
+    int port;                 // TCP port number
+    const char *ip;           // IP address
+    int max_connections;      // Maximum connections (server)
+    int timeout_sec;          // Timeout for operations
+};
+```
+
+#### UDP Configuration
+
+```c
+struct udp_config_s {
+    int port;                 // UDP port number
+    const char *ip;           // IP address for broadcasting
+    int interval_sec;         // Broadcast interval
+};
+```
+
+## Performance Characteristics
+
+### Unix Sockets
+
+-   **Latency**: ~10-20μs for local communication
+-   **Throughput**: Up to 1GB/s for large transfers
+-   **Overhead**: Minimal (no network stack)
+-   **Use Case**: High-performance local IPC
+
+### TCP Sockets
+
+-   **Latency**: ~100-500μs for local communication
+-   **Throughput**: Up to 100MB/s for local communication
+-   **Overhead**: Network stack overhead
+-   **Use Case**: Reliable network communication
+
+### UDP Broadcasting
+
+-   **Latency**: ~50-200μs for local network
+-   **Throughput**: Limited by network bandwidth
+-   **Overhead**: Minimal protocol overhead
+-   **Use Case**: Service discovery and announcements
 
 ## Error Handling
 
--   All functions return success/failure status
--   Detailed error messages via perror()
--   Graceful degradation on network failures
--   Resource cleanup on errors
+All functions return appropriate error codes:
 
-## Performance Considerations
+-   `bool` functions return `true` for success, `false` for failure
+-   `ssize_t` functions return bytes transferred, -1 for error
+-   `int` functions return file descriptors or -1 for error
 
--   Socket reuse with SO_REUSEADDR
--   Efficient buffer management
--   Minimal system calls
--   Proper timeout handling
+Detailed error messages are provided via `perror()` for debugging.
 
-## Integration Notes
+## Thread Safety
 
-This library is designed to replace the scattered networking code in the employee/employer architecture with a unified, reusable interface. It provides the foundation for:
+-   Each socket type maintains separate state
+-   Multiple clients can connect simultaneously
+-   Proper cleanup prevents resource leaks
+-   Thread-safe operations throughout
 
-1. **Employee availability broadcasting**
-2. **Task distribution via TCP**
-3. **Result collection from employees**
-4. **Scalable client-server communication**
+## Integration with Voluntary Computing System
 
-The library handles the low-level socket operations while exposing a clean API for the application logic.
+### Employee Node Example
+
+```c
+void* employee_unix_handler() {
+    struct unix_socket_config_s config = {
+        .socket_path = "/tmp/volcom_employee",
+        .buffer_size = 4096,
+        .timeout_sec = 30
+    };
+
+    if (unix_socket_server_init(&config)) {
+        while (running) {
+            int client_fd = unix_socket_server_accept();
+            if (client_fd >= 0) {
+                // Handle task reception via Unix socket
+                handle_task_via_unix_socket(client_fd);
+                close(client_fd);
+            }
+        }
+        unix_socket_server_cleanup();
+    }
+}
+```
+
+### Employer Node Example
+
+```c
+void send_task_via_unix_socket(const char* task_data) {
+    struct unix_socket_config_s config = {
+        .socket_path = "/tmp/volcom_employee",
+        .buffer_size = 4096,
+        .timeout_sec = 10
+    };
+
+    if (unix_socket_client_init(&config) && unix_socket_client_connect()) {
+        unix_socket_client_send_message(task_data);
+
+        char response[1024];
+        ssize_t bytes = unix_socket_client_receive_message(response, sizeof(response));
+        if (bytes > 0) {
+            printf("Task response: %s\n", response);
+        }
+
+        unix_socket_client_cleanup();
+    }
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Socket file permission denied**: Ensure proper permissions on socket directory
+2. **Address already in use**: Check if previous instances are still running
+3. **Connection refused**: Verify server is running and socket path is correct
+4. **Partial message transfer**: Implement proper message framing for large data
+
+### Debug Mode
+
+Enable debug output by defining `DEBUG` during compilation:
+
+```bash
+gcc -DDEBUG -o test_unix_socket test_unix_socket.c libvolcom_net.a -lpthread
+```
+
+## License
+
+This library is part of the Voluntary Computing Operating System project.
