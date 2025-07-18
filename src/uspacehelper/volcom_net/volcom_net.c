@@ -55,7 +55,7 @@ bool udp_broadcaster_init(struct udp_config_s *config){
     return true;
 }
 
-bool send_udp_broadcast(const char* message) {
+bool send_udp_broadcast1(const char* message) {
     
     if (sockfd < 0) {
         fprintf(stderr, "Broadcaster not initialized\n");

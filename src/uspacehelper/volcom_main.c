@@ -1,11 +1,15 @@
+#include "volcom_agents/employer/volcom_employer.h"
+#include "volcom_agents/employee/volcom_employee.h"
+#include "volcom_sysinfo/volcom_sysinfo.h"
+#include "volcom_rcsmngr/volcom_rcsmngr.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
-#include "volcom_sysinfo/volcom_sysinfo.h"
-#include "volcom_rcsmngr/volcom_rcsmngr.h"
+
+static struct volcom_rcsmngr_s manager;
 
 // Function declarations
 void open_file(char *filename);
@@ -14,6 +18,7 @@ int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, 
 void process_data_stream(struct volcom_rcsmngr_s *manager, const char *script_path);
 
 void open_file(char *filename) {
+
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
         perror("Error opening file");
@@ -268,43 +273,58 @@ void process_data_stream(struct volcom_rcsmngr_s *manager, const char *script_pa
 
 int main(int argc, char *argv[]) {
 
-    struct volcom_rcsmngr_s manager;
     struct config_s config = {0};
+    char *filename = NULL;
 
      if (getuid() != 0) {
-        printf("This programme requires root privileges. Please run with sudo.\n");
-        return 1;
+        printf("[ERRROR][MAIN] This programme requires root privileges. Please run with sudo.\n");
+        open_file("./other/help.txt");
+        return -1;
     }
 
-    if (argc == 3 && strcmp(argv[1], "--file") == 0) {
 
-        config = load_config(argv[2]);
+    if (argc < 3) {
+        printf("[ERRROR][MAIN] Run with the --mode.\n");
+        open_file("./other/help.txt");
+        return -1;
+    }
+
+    // TODO: Add the main programme to the cgroup.
+    if (argc == 5 && strcmp(argv[3], "--file") == 0) {
+        config = load_config(argv[4]);
         print_config(config);
-
-        if (volcom_rcsmngr_init(&manager, "volcom") != 0) {
-            fprintf(stderr, "Failed to initialize resource manager\n");
-            return 1;
-        }
-
-        if (volcom_create_main_cgroup(&manager, config) != 0) {
-            fprintf(stderr, "Failed to create main cgroup\n");
-            volcom_rcsmngr_cleanup(&manager);
-            return 1;
-        }
-
-        volcom_print_cgroup_info(&manager);
-
-
-        process_data_stream(&manager, "./scripts/data_processor.js");
-
-        //Cleanup
-        volcom_delete_main_cgroup(&manager);
-        volcom_rcsmngr_cleanup(&manager);
-
-        return 0;
     } else {
-
+        //TODO: Handle this
         configure_by_cmd(&config);
-        return 0;
     }
+
+    if (volcom_rcsmngr_init(&manager, "volcom") != 0) {
+        fprintf(stderr, "[ERRROR][MAIN] Failed to initialize resource manager\n");
+        return -1;
+    }
+
+    if (volcom_create_main_cgroup(&manager, config) != 0) {
+        fprintf(stderr, "[ERRROR][MAIN] Failed to create main cgroup\n");
+        volcom_rcsmngr_cleanup(&manager);
+        return -1;
+    }
+
+    if (strcmp(argv[1], "--mode") == 0) {
+        if (strcmp(argv[2], "employer") == 0){
+            printf("[EMPLOYER] Launching in Employer Mode...\n");
+            if (run_employer_mode() != 0) {
+                    fprintf(stderr, "[ERRPR][EMPLOYER] Employer mode failed\n");
+            }
+        } else{
+            printf("[EMPLOYEE] Launching in Employee Mode...\n");
+            if (run_employee_mode(&manager) != 0) {
+                fprintf(stderr, "[ERRPR][EMPLOYEE] Employee mode failed\n");
+            }
+        }
+    }
+    
+    // TODO: 
+    //Cleanup
+    volcom_delete_main_cgroup(&manager);
+    volcom_rcsmngr_cleanup(&manager);
 }

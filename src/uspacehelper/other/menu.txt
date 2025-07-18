@@ -1,4 +1,5 @@
 Menu:
+- `mode `
 - `get memory` - Print formatted memory info
 - `get cpu` - Print formatted CPU info
 - `get cpu_usage` - Print formatted CPU usage

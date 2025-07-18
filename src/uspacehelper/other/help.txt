@@ -1,4 +1,5 @@
 Help:
+- Use 'volcom --mode <mode>' to run as a employer or employee
 - Use 'volcom --file <filename>' to load configurations from a file.
 - Use 'volcom config' to enter configuration mode.
 - Use 'volcom menu' to display the main menu.

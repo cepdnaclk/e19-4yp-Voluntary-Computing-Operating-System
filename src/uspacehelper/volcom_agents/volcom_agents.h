@@ -27,8 +27,6 @@ typedef struct {
 } agent_status_t;
 
 // Main agent functions
-int run_employer_mode(void);
-int run_employee_mode(void);
 int run_hybrid_mode(void);
 
 // Agent lifecycle

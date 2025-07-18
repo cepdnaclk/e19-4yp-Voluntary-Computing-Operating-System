@@ -99,7 +99,7 @@ struct unix_socket_config_s{
 
 // UDP Functions
 bool udp_broadcaster_init(struct udp_config_s *config);
-bool send_udp_broadcast(const char* message);
+bool send_udp_broadcast1(const char* message);
 void udp_broadcaster_cleanup(void);
 
 // TCP Server Functions
