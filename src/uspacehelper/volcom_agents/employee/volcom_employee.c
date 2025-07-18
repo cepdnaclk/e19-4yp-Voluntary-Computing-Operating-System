@@ -5,6 +5,7 @@
 static pthread_t broadcaster_thread;
 static pthread_t worker_thread;
 static struct udp_config_s udp_config;
+static struct tcp_config_s tcp_config;
 
 void broadcast_loop() {
 
@@ -30,6 +31,12 @@ void run_employee_mode(){
     udp_config.port = BROADCAST_PORT;
     udp_config.ip = "255.255.255.255";
     udp_config.interval_sec = 60;
+
+    // TODO: implement TCP client configuration
+    // tcp_config.port = TCP_PORT;
+    // tcp_config.ip = "127.0.0.1";
+    // tcp_config.max_connections = 5;
+    // tcp_config.timeout_sec = 10;
 
     if (!udp_broadcaster_init(&udp_config)) {
         fprintf(stderr, "[Employee Mode] Failed to initialize UDP broadcaster\n");
