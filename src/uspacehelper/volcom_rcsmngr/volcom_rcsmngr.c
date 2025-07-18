@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "volcom_rcsmngr.h"
 
 int volcom_rcsmngr_init(struct volcom_rcsmngr_s *manager, const char *cgroup_name) {

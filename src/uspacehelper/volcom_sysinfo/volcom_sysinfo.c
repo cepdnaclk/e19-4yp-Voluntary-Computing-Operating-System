@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "volcom_sysinfo.h"
 
 struct memory_info_s get_memory_info(){
