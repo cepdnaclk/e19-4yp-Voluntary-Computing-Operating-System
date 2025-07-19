@@ -60,30 +60,30 @@ void show_system_info(void) {
 }
 
 // Network utilities (moved from net_utils.c)
-void send_udp_broadcast(const char* message) {
-    int sockfd;
-    struct sockaddr_in addr;
-    int broadcast = 1;
+// void send_udp_broadcast(const char* message) {
+//     int sockfd;
+//     struct sockaddr_in addr;
+//     int broadcast = 1;
 
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror("socket failed");
-        return;
-    }
+//     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+//         perror("socket failed");
+//         return;
+//     }
 
-    if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
-        perror("setsockopt failed");
-        close(sockfd);
-        return;
-    }
+//     if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
+//         perror("setsockopt failed");
+//         close(sockfd);
+//         return;
+//     }
 
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(BROADCAST_PORT);
-    addr.sin_addr.s_addr = inet_addr("255.255.255.255");
+//     memset(&addr, 0, sizeof(addr));
+//     addr.sin_family = AF_INET;
+//     addr.sin_port = htons(BROADCAST_PORT);
+//     addr.sin_addr.s_addr = inet_addr("255.255.255.255");
 
-    sendto(sockfd, message, strlen(message), 0, (struct sockaddr*)&addr, sizeof(addr));
-    close(sockfd);
-}
+//     sendto(sockfd, message, strlen(message), 0, (struct sockaddr*)&addr, sizeof(addr));
+//     close(sockfd);
+// }
 
 void get_local_ip(char* buffer, size_t size) {
     struct ifaddrs *ifaddr, *ifa;
