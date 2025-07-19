@@ -33,6 +33,10 @@ static pthread_t worker_thread;
 static task_buffer_t task_buffer;
 static result_queue_t result_queue; // Global result queue
 static agent_status_t employee_status;
+static bool is_node_started = false;
+
+// Forward declaration for the function to be imported
+extern int start_node(const char* config_path);
 
 // Signal handler
 static void employee_signal_handler(int sig) {
@@ -108,6 +112,11 @@ static void* worker_loop(void* arg) {
     (void)arg;
     
     while (employee_running) {
+        if (!is_node_started) {
+            usleep(100000); // Wait for the node to be started
+            continue;
+        }
+
         received_task_t task;
         
         if (get_task_from_buffer(&task_buffer, &task) == 0) {
@@ -256,6 +265,7 @@ static int send_result_to_employer(int sockfd, const result_info_t* result) {
 // Handle incoming connections and task requests
 static void handle_persistent_connection(int employer_fd) {
     printf("[Employee] Now in persistent communication mode with employer.\n");
+    is_node_started = false; // Reset node status for new connection
 
     while (employee_running) {
         fd_set readfds;
@@ -275,24 +285,85 @@ static void handle_persistent_connection(int employer_fd) {
             break;
         }
         
-        // 1. Check for incoming tasks from the employer
+        // 1. Check for incoming data from the employer
         if (activity > 0 && FD_ISSET(employer_fd, &readfds)) {
-            received_task_t task;
-            memset(&task, 0, sizeof(task));
-            
+            cJSON* initial_check = NULL;
+            if(recv_json_peek(employer_fd, &initial_check) != PROTOCOL_OK) {
+                printf("[Employee] Connection closed by employer.\n");
+                break;
+            }
 
-            if (receive_task_from_employer(employer_fd, &task) == 0) {
-                if (add_task_to_buffer(&task_buffer, &task) == 0) {
-                    printf("[Employee] Task %s successfully received and queued\n", task.task_id);
+            const cJSON* msg_type_item = cJSON_GetObjectItem(initial_check, "message_type");
+            if (!msg_type_item || !cJSON_IsString(msg_type_item)) {
+                printf("[Employee] Invalid message format: missing 'message_type'.\n");
+                cJSON_Delete(initial_check);
+                break; 
+            }
+            
+            char* msg_type = msg_type_item->valuestring;
+
+            if (strcmp(msg_type, "initial_config") == 0) {
+                printf("[Employee] Receiving initial configuration...\n");
+                received_task_t config_task;
+                memset(&config_task, 0, sizeof(config_task));
+                if (receive_task_from_employer(employer_fd, &config_task) == 0) {
+                    // Save the config file and start the node
+                    char config_filepath[512];
+                    snprintf(config_filepath, sizeof(config_filepath), "/tmp/config_%s.sh", config_task.task_id);
+                    FILE* f = fopen(config_filepath, "wb");
+                    if(f) {
+                        fwrite(config_task.data, 1, config_task.data_size, f);
+                        fclose(f);
+                        printf("[Employee] Configuration saved to %s\n", config_filepath);
+                        
+                        // Call the external start_node function
+                        if (start_node(config_filepath) == 0) {
+                            printf("[Employee] Node started successfully.\n");
+                            is_node_started = true;
+                        } else {
+                            fprintf(stderr, "[Employee] ERROR: Failed to start the node.\n");
+                        }
+                        
+                    } else {
+                        perror("[Employee] Failed to save config file");
+                    }
+                    if(config_task.data) free(config_task.data);
+
                 } else {
-                    printf("[Employee] Task buffer full, rejecting task %s\n", task.task_id);
-                    employee_status.tasks_failed++;
-                    if (task.data) free(task.data);
+                    fprintf(stderr, "[Employee] Failed to receive initial configuration.\n");
+                }
+
+            } else if (strcmp(msg_type, "data_chunk") == 0) {
+                if (!is_node_started) {
+                    printf("[Employee] Warning: Received data chunk before node was configured. Ignoring.\n");
+                    // Discard the message fully
+                    received_task_t temp_task;
+                    receive_task_from_employer(employer_fd, &temp_task);
+                    if(temp_task.data) free(temp_task.data);
+                } else {
+                    received_task_t task;
+                    memset(&task, 0, sizeof(task));
+                    if (receive_task_from_employer(employer_fd, &task) == 0) {
+                        if (add_task_to_buffer(&task_buffer, &task) == 0) {
+                            printf("[Employee] Data chunk %s successfully received and queued\n", task.task_id);
+                        } else {
+                            printf("[Employee] Task buffer full, rejecting chunk %s\n", task.task_id);
+                            if (task.data) free(task.data);
+                        }
+                    } else {
+                        printf("[Employee] Failed to receive data chunk or connection closed.\n");
+                        break; // Assume connection is lost
+                    }
                 }
             } else {
-                printf("[Employee] Failed to receive task or connection closed by employer.\n");
-                break; // Assume connection is lost
+                printf("[Employee] Unknown message type received: %s\n", msg_type);
+                // Discard message
+                cJSON* temp_json = NULL;
+                recv_json(employer_fd, &temp_json);
+                cJSON_Delete(temp_json);
             }
+
+            cJSON_Delete(initial_check);
         }
         
         // 2. Check for and send any completed task results
@@ -331,10 +402,12 @@ static int receive_task_from_employer(int sockfd, received_task_t* task) {
     const cJSON *task_id = cJSON_GetObjectItem(metadata, "task_id");
     const cJSON *chunk_filename = cJSON_GetObjectItem(metadata, "chunk_filename");
     const cJSON *sender_id = cJSON_GetObjectItem(metadata, "sender_id");
+    const cJSON *message_type = cJSON_GetObjectItem(metadata, "message_type");
     
     if (!task_id || !cJSON_IsString(task_id) ||
         !chunk_filename || !cJSON_IsString(chunk_filename) ||
-        !sender_id || !cJSON_IsString(sender_id)) {
+        !sender_id || !cJSON_IsString(sender_id) ||
+        !message_type || !cJSON_IsString(message_type)) {
         printf("[Employee] Invalid task metadata\n");
         cJSON_Delete(metadata);
         return -1;

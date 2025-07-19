@@ -30,136 +30,117 @@
 #define EMPLOYEE_PORT 12345
 
 // Task assignment management
-#define MAX_TASK_ASSIGNMENTS 100
-#define TASK_TIMEOUT_SECONDS 60
-
 static task_assignment_t task_assignments[MAX_TASK_ASSIGNMENTS];
 static int assignment_count = 0;
 static pthread_mutex_t assignment_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Global state
 static agent_status_t agent_status;
-static employee_node_t employees[MAX_EMPLOYEES];
+static employee_node_t* employees[MAX_EMPLOYEES];
 static int employee_count = 0;
-static bool agent_running = false;
-static pthread_t employer_thread;
-static char chunk_files[MAX_CHUNKS][MAX_FILENAME_LEN];
-static int num_chunks = 0;
+static pthread_mutex_t employee_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// Function forward declarations
-static void signal_handler(int sig);
-static void scan_chunked_set(void);
-static void remove_stale_employees(void);
-static int add_or_update_employee(const char* ip, const cJSON* broadcast_data);
-static void* employer_main_loop(void* arg);
+// Forward declarations
+static int send_initial_config(employee_node_t* employee);
 static int receive_result_from_employee(employee_node_t* employee);
 
 // Signal handler
 static void signal_handler(int sig) {
     (void)sig;
-    agent_running = false;
+    // agent_running = false; // This should be handled by the main executable
     printf("\nShutting down agent...\n");
-}
-
-// Scan chunked set directory
-static void scan_chunked_set(void) {
-    DIR *dir = opendir(CHUNKED_SET_PATH);
-    if (!dir) {
-        printf("[Employer] Warning: Cannot open chunked set directory %s\n", CHUNKED_SET_PATH);
-        return;
-    }
-    
-    num_chunks = 0;
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL && num_chunks < MAX_CHUNKS) {
-        if (entry->d_type == DT_REG) { // Regular file
-            strncpy(chunk_files[num_chunks], entry->d_name, MAX_FILENAME_LEN - 1);
-            chunk_files[num_chunks][MAX_FILENAME_LEN - 1] = '\0';
-            num_chunks++;
-        }
-    }
-    
-    closedir(dir);
-    printf("[Employer] Found %d chunk files in %s\n", num_chunks, CHUNKED_SET_PATH);
 }
 
 // Remove stale employees
 static void remove_stale_employees(void) {
+    pthread_mutex_lock(&employee_mutex);
     time_t current_time = time(NULL);
     int i = 0;
     
     while (i < employee_count) {
-        if (current_time - employees[i].last_seen > STALE_THRESHOLD) {
+        if (current_time - employees[i]->last_seen > STALE_THRESHOLD) {
             printf("[Employer] Removing stale employee %s (%s)\n", 
-                   employees[i].employee_id, employees[i].ip_address);
+                   employees[i]->employee_id, employees[i]->ip_address);
             
+            if(employees[i]->sockfd >= 0) close(employees[i]->sockfd);
+            free(employees[i]);
+
             // Move last employee to this position
             if (i < employee_count - 1) {
-                memcpy(&employees[i], &employees[employee_count - 1], sizeof(employee_node_t));
+                employees[i] = employees[employee_count - 1];
             }
             employee_count--;
         } else {
             i++;
         }
     }
+    pthread_mutex_unlock(&employee_mutex);
 }
 
 // Add or update employee
-static int add_or_update_employee(const char* ip, const cJSON* broadcast_data) {
+static employee_node_t* add_or_update_employee(const char* ip, const cJSON* broadcast_data) {
+    pthread_mutex_lock(&employee_mutex);
     time_t current_time = time(NULL);
     
     // Check if employee already exists
     for (int i = 0; i < employee_count; i++) {
-        if (strcmp(employees[i].ip_address, ip) == 0) {
-            employees[i].last_seen = current_time;
+        if (strcmp(employees[i]->ip_address, ip) == 0) {
+            employees[i]->last_seen = current_time;
             // If connection was dropped, try to reconnect
-            if (employees[i].sockfd < 0) {
-                employees[i].sockfd = create_tcp_connection(ip, EMPLOYEE_PORT);
-                if (employees[i].sockfd >= 0) {
+            if (employees[i]->sockfd < 0) {
+                employees[i]->sockfd = create_tcp_connection(ip, EMPLOYEE_PORT);
+                if (employees[i]->sockfd >= 0) {
                     printf("[Employer] Re-established connection with employee %s\n", ip);
+                    employees[i]->state = EMPLOYEE_STATE_NEW; // Reset state on reconnect
                 }
             }
-            employees[i].is_available = (employees[i].sockfd >= 0);
-            return i;
+            pthread_mutex_unlock(&employee_mutex);
+            return employees[i];
         }
     }
     
     // Add new employee if space available
     if (employee_count < MAX_EMPLOYEES) {
-        employee_node_t *emp = &employees[employee_count];
+        employee_node_t *new_employee = (employee_node_t*)malloc(sizeof(employee_node_t));
+        if (!new_employee) {
+            pthread_mutex_unlock(&employee_mutex);
+            return NULL;
+        }
         
-        strncpy(emp->ip_address, ip, sizeof(emp->ip_address) - 1);
-        emp->ip_address[sizeof(emp->ip_address) - 1] = '\0';
+        strncpy(new_employee->ip_address, ip, sizeof(new_employee->ip_address) - 1);
         
         // Extract employee info from broadcast data
         const cJSON *id = cJSON_GetObjectItem(broadcast_data, "employee_id");
         if (id && cJSON_IsString(id)) {
-            strncpy(emp->employee_id, id->valuestring, sizeof(emp->employee_id) - 1);
-            emp->employee_id[sizeof(emp->employee_id) - 1] = '\0';
+            strncpy(new_employee->employee_id, id->valuestring, sizeof(new_employee->employee_id) - 1);
         } else {
-            snprintf(emp->employee_id, sizeof(emp->employee_id), "emp_%d", employee_count);
+            snprintf(new_employee->employee_id, sizeof(new_employee->employee_id), "emp_%d", employee_count);
         }
         
-        emp->last_seen = current_time;
-        emp->active_tasks = 0;
-        emp->reliability_score = 100;
+        new_employee->last_seen = current_time;
+        new_employee->active_tasks = 0;
+        new_employee->reliability_score = 100;
+        new_employee->tasks_completed = 0;
+        new_employee->tasks_failed = 0;
+        new_employee->state = EMPLOYEE_STATE_NEW; // Initial state
         
-        // Attempt to create persistent TCP connection
-        printf("[Employer] New employee %s discovered. Attempting to connect...\n", ip);
-        emp->sockfd = create_tcp_connection(ip, EMPLOYEE_PORT);
-        if (emp->sockfd < 0) {
+        // Establish persistent TCP connection
+        new_employee->sockfd = create_tcp_connection(ip, EMPLOYEE_PORT);
+        if (new_employee->sockfd < 0) {
             printf("[Employer] Warning: Failed to establish persistent connection with %s\n", ip);
-            emp->is_available = false;
         } else {
             printf("[Employer] Persistent connection established with %s\n", ip);
-            emp->is_available = true;
         }
         
+        employees[employee_count] = new_employee;
         employee_count++;
-        return employee_count - 1;
+        
+        pthread_mutex_unlock(&employee_mutex);
+        return new_employee;
     }
     
-    return -1; // No space for new employee
+    pthread_mutex_unlock(&employee_mutex);
+    return NULL; // No space for new employee
 }
 
 // Task assignment functions
@@ -188,14 +169,16 @@ int send_pending_tasks(void) {
         if (!task_assignments[i].is_sent && !task_assignments[i].is_completed) {
             // Find the employee for this task
             employee_node_t* employee = NULL;
+            pthread_mutex_lock(&employee_mutex);
             for (int j = 0; j < employee_count; j++) {
-                if (strcmp(employees[j].ip_address, task_assignments[i].employee_ip) == 0) {
-                    employee = &employees[j];
+                if (strcmp(employees[j]->ip_address, task_assignments[i].employee_ip) == 0) {
+                    employee = employees[j];
                     break;
                 }
             }
+            pthread_mutex_unlock(&employee_mutex);
 
-            if (employee && employee->is_available && employee->sockfd >= 0) {
+            if (employee && employee->sockfd >= 0 && employee->state == EMPLOYEE_STATE_CONFIGURED) {
                 // Send task to employee using the persistent connection
                 int result = send_file_to_employee(employee->sockfd, 
                                                  task_assignments[i].chunk_file,
@@ -259,13 +242,15 @@ int handle_task_timeouts(void) {
                 task_assignments[i].retry_count++;
                 
                 // Update employee reliability
+                pthread_mutex_lock(&employee_mutex);
                 for (int j = 0; j < employee_count; j++) {
-                    if (strcmp(employees[j].ip_address, task_assignments[i].employee_ip) == 0) {
-                        employees[j].reliability_score -= 10;
-                        employees[j].active_tasks--;
+                    if (strcmp(employees[j]->ip_address, task_assignments[i].employee_ip) == 0) {
+                        employees[j]->reliability_score -= 10;
+                        if(employees[j]->active_tasks > 0) employees[j]->active_tasks--;
                         break;
                     }
                 }
+                pthread_mutex_unlock(&employee_mutex);
                 
                 timeout_count++;
             }
@@ -276,16 +261,83 @@ int handle_task_timeouts(void) {
     return timeout_count;
 }
 
-// Modified to use a persistent connection
+// Send the initial configuration script to a new employee
+static int send_initial_config(employee_node_t* employee) {
+    // Assuming the script is named "script"
+    const char *filename = "/script.py";
+    char config_filepath[512];  // Make sure the buffer is large enough
+
+    snprintf(config_filepath, sizeof(config_filepath), "%s%s", CHUNKED_SET_PATH, filename);
+    printf("[Employer] Sending initial config '%s' to %s\n", config_filepath, employee->ip_address);
+
+    // 1. Send metadata
+    cJSON *metadata = cJSON_CreateObject();
+    cJSON_AddStringToObject(metadata, "message_type", "initial_config");
+    cJSON_AddStringToObject(metadata, "task_id", "init_script");
+    cJSON_AddStringToObject(metadata, "chunk_filename", "script.py");
+    cJSON_AddStringToObject(metadata, "sender_id", "employer");
+    if (send_json(employee->sockfd, metadata) != PROTOCOL_OK) {
+        printf("[Employer] Failed to send initial_config metadata to %s\n", employee->ip_address);
+        cJSON_Delete(metadata);
+        return -1;
+    }
+    cJSON_Delete(metadata);
+
+    // 2. Send file content (reusing parts of send_file_to_employee logic)
+    FILE *file = fopen(config_filepath, "rb");
+    if (!file) {
+        printf("[Employer] ERROR: Could not open initial config file '%s'\n", config_filepath);
+        return -1;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    uint32_t net_size = htonl((uint32_t)file_size);
+    if (send(employee->sockfd, &net_size, sizeof(net_size), 0) != sizeof(net_size)) {
+        printf("[Employer] Failed to send config file size to %s\n", employee->ip_address);
+        fclose(file);
+        return -1;
+    }
+
+    char buffer[4096];
+    size_t total_sent = 0;
+    while (total_sent < (size_t)file_size) {
+        size_t to_read = sizeof(buffer);
+        if (total_sent + to_read > (size_t)file_size) {
+            to_read = file_size - total_sent;
+        }
+        size_t bytes_read = fread(buffer, 1, to_read, file);
+        if (bytes_read == 0) break;
+
+        ssize_t bytes_sent = send(employee->sockfd, buffer, bytes_read, 0);
+        if (bytes_sent <= 0) {
+            printf("[Employer] Failed to send config file data to %s.\n", employee->ip_address);
+            fclose(file);
+            return -1;
+        }
+        total_sent += bytes_sent;
+    }
+    fclose(file);
+
+    printf("[Employer] Successfully sent initial config to %s\n", employee->ip_address);
+    employee->state = EMPLOYEE_STATE_CONFIGURED; // Update state
+    return 0;
+}
+
+
+// Modified to use a persistent connection and send data chunks
 int send_file_to_employee(int sockfd, const char* filepath, const char* task_id, const char* employee_ip) {
     if (sockfd < 0 || !filepath || !task_id) {
         return -1;
     }
     
-    printf("[Employer] Using persistent connection to send task %s to %s\n", task_id, employee_ip);
+    printf("[Employer] Using persistent connection to send data chunk %s to %s\n", task_id, employee_ip);
     
     // Send task metadata
     cJSON *metadata = create_task_metadata(task_id, filepath, "employer", employee_ip, "pending");
+    cJSON_AddStringToObject(metadata, "message_type", "data_chunk"); // Specify message type
     if (send_json(sockfd, metadata) != PROTOCOL_OK) {
         printf("[Employer] Failed to send metadata to %s\n", employee_ip);
         cJSON_Delete(metadata);
@@ -430,35 +482,31 @@ static int receive_result_from_employee(employee_node_t* employee) {
 }
 
 // Distributes unassigned tasks to available employees
-static void distribute_new_tasks(void) {
-    static int last_assigned_chunk = 0;
+static void distribute_new_tasks(const char* task_file_path) {
     static int last_used_employee = 0;
 
     if (employee_count == 0) return;
 
-    // Check if all tasks have been assigned
-    if (last_assigned_chunk >= num_chunks) {
-        return;
-    }
-
     // Find next available employee using round-robin
+    pthread_mutex_lock(&employee_mutex);
     int attempts = 0;
     while (attempts < employee_count) {
-        employee_node_t* current_employee = &employees[last_used_employee];
+        employee_node_t* current_employee = employees[last_used_employee];
 
-        if (current_employee->is_available && current_employee->active_tasks < 3) {
-            char filepath[512];
-            snprintf(filepath, sizeof(filepath), "%s/%s", CHUNKED_SET_PATH, chunk_files[last_assigned_chunk]);
+        if (current_employee->sockfd >= 0 && current_employee->state == EMPLOYEE_STATE_CONFIGURED && current_employee->active_tasks < 3) {
+            
+            char task_id[MAX_FILENAME_LEN];
+            snprintf(task_id, sizeof(task_id), "task_%ld", time(NULL));
 
             printf("[Employer] Assigning %s to employee %s (%s)\n", 
-                   chunk_files[last_assigned_chunk], 
+                   task_file_path, 
                    current_employee->employee_id,
                    current_employee->ip_address);
 
             // Create task assignment
             task_assignment_t assignment;
-            strncpy(assignment.task_id, chunk_files[last_assigned_chunk], sizeof(assignment.task_id) - 1);
-            strncpy(assignment.chunk_file, filepath, sizeof(assignment.chunk_file) - 1);
+            strncpy(assignment.task_id, task_id, sizeof(assignment.task_id) - 1);
+            strncpy(assignment.chunk_file, task_file_path, sizeof(assignment.chunk_file) - 1);
             strncpy(assignment.employee_id, current_employee->employee_id, sizeof(assignment.employee_id) - 1);
             strncpy(assignment.employee_ip, current_employee->ip_address, sizeof(assignment.employee_ip) - 1);
             assignment.assigned_time = time(NULL);
@@ -470,190 +518,246 @@ static void distribute_new_tasks(void) {
             if (add_task_assignment(&assignment) == 0) {
                 current_employee->active_tasks++;
                 printf("[Employer] Task %s queued for %s\n", assignment.task_id, assignment.employee_ip);
-                last_assigned_chunk++; // Move to the next chunk
             } else {
-                printf("[Employer] Failed to queue task %s\n", chunk_files[last_assigned_chunk]);
+                printf("[Employer] Failed to queue task %s\n", task_id);
             }
             
             // Move to the next employee for the next assignment
             last_used_employee = (last_used_employee + 1) % employee_count;
+            pthread_mutex_unlock(&employee_mutex);
             return; // Assign one task per call
         }
         
         last_used_employee = (last_used_employee + 1) % employee_count;
         attempts++;
     }
+    pthread_mutex_unlock(&employee_mutex);
 }
 
+// Scan CHUNKED_SET_PATH for .json files and queue them as tasks
+void populate_chunked_tasks() {
+    DIR *dir = opendir(CHUNKED_SET_PATH);
+    if (!dir) {
+        perror("opendir");
+        return;
+    }
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strstr(entry->d_name, ".json")) {
+            char filepath[512];
+            snprintf(filepath, sizeof(filepath), "%s/%s", CHUNKED_SET_PATH, entry->d_name);
 
-// Main employer loop - refactored for continuous discovery
-static void* employer_main_loop(void* arg) {
-    (void)arg;
-    
-    int sockfd;
-    struct sockaddr_in addr, client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    char buffer[BUFFER_SIZE];
-    fd_set readfds;
-    struct timeval timeout;
-    
+            task_assignment_t assignment = {0};
+            strncpy(assignment.task_id, entry->d_name, sizeof(assignment.task_id) - 1);
+            strncpy(assignment.chunk_file, filepath, sizeof(assignment.chunk_file) - 1);
+            assignment.is_completed = false;
+            assignment.is_sent = false;
+            assignment.retry_count = 0;
+            // employee_id and employee_ip will be set when assigned
+            add_task_assignment(&assignment);
+        }
+    }
+    closedir(dir);
+}
+
+// Main employer loop - refactored for continuous discovery and dynamic task queue
+void* employer_main_loop(void* arg) {
+    (void)arg; // Unused
+
+    // Scan chunked set directory and queue all .json files as tasks
+    populate_chunked_tasks();
+
+    int discovery_sockfd;
+    struct sockaddr_in addr;
+
     // Create UDP socket for employee discovery
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0) {
+    discovery_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (discovery_sockfd < 0) {
         perror("socket");
         return NULL;
     }
-    
+
     // Enable broadcast and address reuse
     int broadcast = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
+    if (setsockopt(discovery_sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
         perror("setsockopt broadcast");
-        close(sockfd);
+        close(discovery_sockfd);
         return NULL;
     }
-    
+
     int reuse = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+    if (setsockopt(discovery_sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
         perror("setsockopt reuse");
-        close(sockfd);
+        close(discovery_sockfd);
         return NULL;
     }
-    
+
     // Bind socket
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(PORT);
-    
-    if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+
+    if (bind(discovery_sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         perror("bind");
-        close(sockfd);
+        close(discovery_sockfd);
         return NULL;
     }
-    
+
     printf("[Employer] Listening for employee broadcasts on port %d\n", PORT);
-    
+
     agent_status.mode = AGENT_MODE_EMPLOYER;
     agent_status.start_time = time(NULL);
     agent_status.is_active = true;
-    
+
     // Create results directory if it doesn't exist
     mkdir(RESULTS_PATH, 0777);
 
-    // Scan for chunk files once at the start
-    scan_chunked_set();
-    if (num_chunks == 0) {
-        printf("[Employer] No chunk files found. Exiting.\n");
-        close(sockfd);
-        return NULL;
-    }
-    
     time_t last_status_update = time(NULL);
-    int completed_tasks = 0;
+    int completed_tasks_count = 0;
 
     // Main loop for continuous discovery and task management
-    while (agent_running) {
+    while (agent_status.is_active) {
+        fd_set readfds;
+        struct timeval timeout;
         FD_ZERO(&readfds);
-        FD_SET(sockfd, &readfds); // Add UDP listener
-        int max_fd = sockfd;
+        FD_SET(discovery_sockfd, &readfds); // Add UDP listener
+        int max_fd = discovery_sockfd;
 
         // Add all active employee sockets to the set
+        pthread_mutex_lock(&employee_mutex);
         for (int i = 0; i < employee_count; i++) {
-            if (employees[i].sockfd >= 0) {
-                FD_SET(employees[i].sockfd, &readfds);
-                if (employees[i].sockfd > max_fd) {
-                    max_fd = employees[i].sockfd;
+            if (employees[i]->sockfd >= 0) {
+                FD_SET(employees[i]->sockfd, &readfds);
+                if (employees[i]->sockfd > max_fd) {
+                    max_fd = employees[i]->sockfd;
                 }
             }
         }
-        
+        pthread_mutex_unlock(&employee_mutex);
+
         timeout.tv_sec = 1; // Set timeout to 1 second
         timeout.tv_usec = 0;
-        
+
         int activity = select(max_fd + 1, &readfds, NULL, NULL, &timeout);
-        
+
         if (activity < 0 && errno != EINTR) {
             perror("select");
             break;
         }
-        
+
         // 1. Discover Employees (if there's data on the UDP socket)
-        if (FD_ISSET(sockfd, &readfds)) {
-            ssize_t bytes_received = recvfrom(sockfd, buffer, BUFFER_SIZE - 1, 0,
+        if (FD_ISSET(discovery_sockfd, &readfds)) {
+            char buffer[BUFFER_SIZE];
+            struct sockaddr_in client_addr;
+            socklen_t client_len = sizeof(client_addr);
+            ssize_t bytes_received = recvfrom(discovery_sockfd, buffer, BUFFER_SIZE - 1, 0,
                                             (struct sockaddr*)&client_addr, &client_len);
-            
+
             if (bytes_received > 0) {
                 buffer[bytes_received] = '\0';
                 char client_ip[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-                
+
                 cJSON *json = cJSON_Parse(buffer);
                 if (json) {
-                    const cJSON *type = cJSON_GetObjectItem(json, "type");
-                    const cJSON *mode = cJSON_GetObjectItem(json, "mode");
-                    
-                    if (type && cJSON_IsString(type) && 
-                        strcmp(type->valuestring, "volcom_broadcast") == 0 &&
-                        mode && cJSON_IsString(mode) && 
-                        strcmp(mode->valuestring, "employee") == 0) {
-                        
-                        add_or_update_employee(client_ip, json);
-                    }
+                    add_or_update_employee(client_ip, json);
                     cJSON_Delete(json);
                 }
             }
         }
-        
+
         // 2. Check for incoming results from employees
+        pthread_mutex_lock(&employee_mutex);
         for (int i = 0; i < employee_count; i++) {
-            if (employees[i].sockfd >= 0 && FD_ISSET(employees[i].sockfd, &readfds)) {
-                if (receive_result_from_employee(&employees[i]) != 0) {
+            if (employees[i]->sockfd >= 0 && FD_ISSET(employees[i]->sockfd, &readfds)) {
+                if (receive_result_from_employee(employees[i]) != 0) {
                     // Handle error/disconnection
-                    printf("[Employer] Connection lost with employee %s while receiving result.\n", employees[i].ip_address);
-                    close(employees[i].sockfd);
-                    employees[i].sockfd = -1;
-                    employees[i].is_available = false;
+                    printf("[Employer] Connection lost with employee %s while receiving result.\n", employees[i]->ip_address);
+                    close(employees[i]->sockfd);
+                    employees[i]->sockfd = -1;
                 }
             }
         }
+        pthread_mutex_unlock(&employee_mutex);
 
-        // 3. Distribute New Tasks
-        distribute_new_tasks();
+        // 3. Send initial configs to new employees
+        pthread_mutex_lock(&employee_mutex);
+        for (int i = 0; i < employee_count; i++) {
+            if (employees[i]->sockfd >= 0) {
+                if (employees[i]->state == EMPLOYEE_STATE_NEW) {
+                    if (send_initial_config(employees[i]) != 0) {
+                        printf("[Employer] Failed to send initial config to %s. Marking as failed.\n", employees[i]->ip_address);
+                        close(employees[i]->sockfd);
+                        employees[i]->sockfd = -1; // Mark as disconnected
+                    }
+                }
+            }
+        }
+        pthread_mutex_unlock(&employee_mutex);
 
-        // 4. Manage Ongoing Tasks
+        // 4. Assign unassigned tasks to available employees
+        pthread_mutex_lock(&assignment_mutex);
+        for (int i = 0; i < assignment_count; i++) {
+            if (!task_assignments[i].is_sent && !task_assignments[i].is_completed) {
+                // Find an available employee
+                pthread_mutex_lock(&employee_mutex);
+                for (int j = 0; j < employee_count; j++) {
+                    employee_node_t* emp = employees[j];
+                    if (emp->sockfd >= 0 && emp->state == EMPLOYEE_STATE_CONFIGURED && emp->active_tasks < 3) {
+                        // Assign task to this employee
+                        strncpy(task_assignments[i].employee_id, emp->employee_id, sizeof(task_assignments[i].employee_id) - 1);
+                        strncpy(task_assignments[i].employee_ip, emp->ip_address, sizeof(task_assignments[i].employee_ip) - 1);
+                        task_assignments[i].assigned_time = time(NULL);
+                        emp->active_tasks++;
+                        printf("[Employer] Task %s assigned to %s\n", task_assignments[i].task_id, emp->ip_address);
+                        break;
+                    }
+                }
+                pthread_mutex_unlock(&employee_mutex);
+            }
+        }
+        pthread_mutex_unlock(&assignment_mutex);
+
+        // 5. Manage Ongoing Tasks
         send_pending_tasks();
         handle_task_timeouts();
-        
-        // 5. Maintain Employee List
+
+        // 6. Maintain Employee List
         remove_stale_employees();
-        
-        // 6. Report Status
-        completed_tasks = count_completed_tasks();
+
+        // 7. Report Status
+        completed_tasks_count = count_completed_tasks();
+        int total_task_count = assignment_count;
         time_t current_time = time(NULL);
         if (current_time - last_status_update >= 10) {
             printf("[Employer] Status: %d employees | %d/%d tasks completed.\n", 
-                   employee_count, completed_tasks, num_chunks);
+                   employee_count, completed_tasks_count, total_task_count);
             last_status_update = current_time;
         }
 
-        // 7. Check for Completion
-        if (completed_tasks >= num_chunks) {
+        // 8. Check for Completion
+        if (total_task_count > 0 && completed_tasks_count >= total_task_count) {
             printf("[Employer] All tasks completed! Shutting down in 10 seconds.\n");
             sleep(10);
-            agent_running = false;
+            agent_status.is_active = false;
         }
     }
-    
+
     printf("[Employer] Main loop finished.\n");
 
     // Clean up: close all persistent connections
+    pthread_mutex_lock(&employee_mutex);
     for (int i = 0; i < employee_count; i++) {
-        if (employees[i].sockfd >= 0) {
-            close(employees[i].sockfd);
+        if (employees[i]->sockfd >= 0) {
+            close(employees[i]->sockfd);
         }
+        free(employees[i]);
     }
+    employee_count = 0;
+    pthread_mutex_unlock(&employee_mutex);
 
-    close(sockfd);
+    close(discovery_sockfd);
     return NULL;
 }
 
@@ -667,54 +771,28 @@ int init_agent(agent_mode_t mode) {
 
 void cleanup_agent(void) {
     // Clean up any resources
-    agent_running = false;
-}
-
-int start_agent(void) {
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    
-    agent_running = true;
-    
-    if (pthread_create(&employer_thread, NULL, employer_main_loop, NULL) != 0) {
-        perror("pthread_create");
-        return -1;
-    }
-    
-    return 0;
-}
-
-int stop_agent(void) {
-    agent_running = false;
-    
-    if (employer_thread) {
-        pthread_join(employer_thread, NULL);
-    }
-    
     agent_status.is_active = false;
-    return 0;
 }
 
 agent_status_t get_agent_status(void) {
     return agent_status;
 }
 
-int run_employer_mode(void) {
-    printf("[Employer] Starting employer mode...\n");
-    
-    if (init_agent(AGENT_MODE_EMPLOYER) != 0) {
-        fprintf(stderr, "Failed to initialize agent\n");
+// Main employer entry point
+int run_employer_mode(char* task_files[]) {
+    (void)task_files; // No longer used
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    agent_status.is_active = true;
+
+    pthread_t employer_thread;
+    if (pthread_create(&employer_thread, NULL, employer_main_loop, NULL) != 0) {
+        perror("pthread_create");
         return -1;
     }
-    
-    if (start_agent() != 0) {
-        fprintf(stderr, "Failed to start agent\n");
-        return -1;
-    }
-    
-    // Wait for completion or interruption
+
     pthread_join(employer_thread, NULL);
-    
-    printf("[Employer] Employer mode completed\n");
+
     return 0;
 }

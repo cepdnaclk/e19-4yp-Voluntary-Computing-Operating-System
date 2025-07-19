@@ -23,29 +23,17 @@ UTILS_SRC_DIR = volcom_utils
 SYSINFO_SRC_DIR = volcom_sysinfo
 
 # Source files
-AGENT_SRCS = $(AGENTS_SRC_DIR)/employer_mode.c \
-              $(AGENTS_SRC_DIR)/employee_mode.c \
-              $(AGENTS_SRC_DIR)/task_buffer.c \
-              $(AGENTS_SRC_DIR)/result_queue.c
-
-NET_SRCS = $(NET_SRC_DIR)/protocol.c
-
-SCHED_SRCS = $(SCHEDULER_SRC_DIR)/task_scheduler.c
-
-UTIL_SRCS = $(UTILS_SRC_DIR)/net_utils.c
-
-SYSINFO_SRCS = $(SYSINFO_SRC_DIR)/volcom_sysinfo.c
-
-# All source files
-SRCS = volcom_main_new.c \
-       $(AGENT_SRCS) \
-       $(NET_SRCS) \
-       $(SCHED_SRCS) \
-       $(UTIL_SRCS) \
-       $(SYSINFO_SRCS)
+C_SOURCES = volcom_main_new.c \
+            volcom_agents/employer_mode.c \
+            volcom_agents/employee_mode.c \
+            volcom_agents/task_management.c \
+            volcom_net/protocol.c \
+            volcom_scheduler/task_scheduler.c \
+            volcom_utils/net_utils.c \
+            volcom_sysinfo/volcom_sysinfo.c
 
 # Object files
-OBJS = $(SRCS:.c=.o)
+OBJS = $(C_SOURCES:.c=.o)
 
 # Target executable
 TARGET = volcom_main_new
