@@ -14,7 +14,7 @@ static struct volcom_rcsmngr_s manager;
 // Function declarations
 void open_file(char *filename);
 void configure_by_cmd(struct config_s *config);
-int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path, const char *data_point);
+int run_node_in_cgroup_o(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path, const char *data_point);
 void process_data_stream(struct volcom_rcsmngr_s *manager, const char *script_path);
 
 void open_file(char *filename) {
@@ -137,7 +137,7 @@ void configure_by_cmd(struct config_s *config) {
                         printf("Failed to create main cgroup for processing\n");
                     } else {
                         // Process single data point
-                        int result = run_node_in_cgroup(&single_manager, "SingleProcessor", 
+                        int result = run_node_in_cgroup_o(&single_manager, "SingleProcessor", 
                                                        "./scripts/data_processor.js", data_point);
                         if (result == 0) {
                             printf("✓ Data point processed successfully\n");
@@ -174,7 +174,7 @@ void configure_by_cmd(struct config_s *config) {
         }
 }
 
-int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path, const char *data_point) {
+int run_node_in_cgroup_o(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path, const char *data_point) {
 
     pid_t pid = fork();
 
@@ -246,7 +246,7 @@ void process_data_stream(struct volcom_rcsmngr_s *manager, const char *script_pa
         char task_name[64];
         snprintf(task_name, sizeof(task_name), "DataProcessor_%d", i + 1);
         
-        int result = run_node_in_cgroup(manager, task_name, script_path, data_points[i]);
+        int result = run_node_in_cgroup_o(manager, task_name, script_path, data_points[i]);
         
         if (result == 0) {
             successful++;

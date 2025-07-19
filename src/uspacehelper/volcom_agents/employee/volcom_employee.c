@@ -3,6 +3,7 @@
 #include "../volcom_utils/volcom_utils.h"
 #include "../volcom_net/volcom_net.h"
 #include "../volcom_sysinfo/volcom_sysinfo.h"
+#include "../volcom_rcsmngr/volcom_rcsmngr.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -13,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -424,7 +426,7 @@ static int receive_task_from_employer(int sockfd, received_task_t* task) {
 }
 
 // Employee mode main function
-int run_employee_mode(volcom_rcsmngr_s *manager) {
+int run_employee_mode(struct volcom_rcsmngr_s *manager) {
     printf("[Employee] Starting Employee Mode...\n");
 
     if (init_agent(AGENT_MODE_EMPLOYEE) != 0) {
@@ -445,18 +447,25 @@ int run_employee_mode(volcom_rcsmngr_s *manager) {
         return -1;
     }
 
-    if (volcom_rcsmngr_init(&manager, "volcom") != 0) {
+    // Initialize default config
+    struct config_s config = {0};
+    config.mem_config.allocated_memory_size_max = 1024 * 1024 * 1024;  // 1GB default
+    config.mem_config.allocated_memory_size_high = 800 * 1024 * 1024;  // 800MB high
+    config.cpu_config.allocated_logical_processors = 2;  // 2 cores default
+    config.cpu_config.allocated_cpu_share = 80;  // 80% default
+
+    if (volcom_rcsmngr_init(manager, "volcom") != 0) {
         fprintf(stderr, "Failed to initialize resource manager\n");
         return 1;
     }
 
-    if (volcom_create_main_cgroup(&manager, config) != 0) {
+    if (volcom_create_main_cgroup(manager, config) != 0) {
         fprintf(stderr, "Failed to create main cgroup\n");
-        volcom_rcsmngr_cleanup(&manager);
+        volcom_rcsmngr_cleanup(manager);
         return 1;
     }
 
-    volcom_print_cgroup_info(&manager);
+    volcom_print_cgroup_info(manager);
 
     signal(SIGINT, employee_signal_handler);
     signal(SIGTERM, employee_signal_handler);
@@ -606,7 +615,7 @@ int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, 
     if (pid == 0) {
         // Child process - execute Node.js script with data point as argument
         printf("Child process %d starting Node.js task: %s with data: %s\n", getpid(), task_name, data_point);
-        execlp("node", "node", script_path, data_point, NULL);
+        execlp("node", "node", script_path);
         perror("execlp failed - Node.js not found or script error");
         exit(1);
     } else {

@@ -7,6 +7,7 @@ INCLUDES = -I./volcom_agents \
            -I./volcom_scheduler \
            -I./volcom_utils \
            -I./volcom_sysinfo \
+           -I./volcom_rcsmngr \
            -I/usr/include/cjson
 
 # Linker flags
@@ -21,10 +22,11 @@ NET_SRC_DIR = volcom_net
 SCHEDULER_SRC_DIR = volcom_scheduler
 UTILS_SRC_DIR = volcom_utils
 SYSINFO_SRC_DIR = volcom_sysinfo
+RCSMNGR_SRC_DIR = volcom_rcsmngr
 
 # Source files
-AGENT_SRCS = $(AGENTS_SRC_DIR)/employer_mode.c \
-              $(AGENTS_SRC_DIR)/employee_mode.c \
+AGENT_SRCS = $(AGENTS_SRC_DIR)/employer/volcom_employer.c \
+              $(AGENTS_SRC_DIR)/employee/volcom_employee.c \
               $(AGENTS_SRC_DIR)/task_buffer.c \
               $(AGENTS_SRC_DIR)/result_queue.c
 
@@ -36,19 +38,22 @@ UTIL_SRCS = $(UTILS_SRC_DIR)/net_utils.c
 
 SYSINFO_SRCS = $(SYSINFO_SRC_DIR)/volcom_sysinfo.c
 
+RCSMNGR_SRCS = $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.c
+
 # All source files
-SRCS = volcom_main_new.c \
+SRCS = volcom_main.c \
        $(AGENT_SRCS) \
        $(NET_SRCS) \
        $(SCHED_SRCS) \
        $(UTIL_SRCS) \
-       $(SYSINFO_SRCS)
+       $(SYSINFO_SRCS) \
+       $(RCSMNGR_SRCS)
 
 # Object files
 OBJS = $(SRCS:.c=.o)
 
 # Target executable
-TARGET = volcom_main_new
+TARGET = volcom_main
 
 # Default target
 all: $(TARGET)
@@ -141,18 +146,19 @@ help:
 .PHONY: all clean debug release install-deps create-dirs info run help test-agents test-net test-scheduler
 
 # Dependencies (simple dependency tracking)
-volcom_main_new.o: volcom_main_new.c volcom_agents/volcom_agents.h volcom_utils/volcom_utils.h
+volcom_main.o: volcom_main.c volcom_agents/volcom_agents.h volcom_utils/volcom_utils.h
 
-$(AGENTS_SRC_DIR)/employer_mode.o: $(AGENTS_SRC_DIR)/employer_mode.c \
+$(AGENTS_SRC_DIR)/employer_mode.o: $(AGENTS_SRC_DIR)/employer/volcom_employer.c \
                                    $(AGENTS_SRC_DIR)/volcom_agents.h \
                                    $(UTILS_SRC_DIR)/volcom_utils.h \
                                    $(NET_SRC_DIR)/volcom_net.h \
                                    $(SCHEDULER_SRC_DIR)/volcom_scheduler.h
 
-$(AGENTS_SRC_DIR)/employee_mode.o: $(AGENTS_SRC_DIR)/employee_mode.c \
+$(AGENTS_SRC_DIR)/employee_mode.o: $(AGENTS_SRC_DIR)/employee/volcom_employee.c \
                                    $(AGENTS_SRC_DIR)/volcom_agents.h \
                                    $(UTILS_SRC_DIR)/volcom_utils.h \
-                                   $(NET_SRC_DIR)/volcom_net.h
+                                   $(NET_SRC_DIR)/volcom_net.h \
+                                   $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.h
 
 $(AGENTS_SRC_DIR)/task_buffer.o: $(AGENTS_SRC_DIR)/task_buffer.c \
                                  $(AGENTS_SRC_DIR)/volcom_agents.h
@@ -171,5 +177,9 @@ $(UTILS_SRC_DIR)/net_utils.o: $(UTILS_SRC_DIR)/net_utils.c \
                                $(UTILS_SRC_DIR)/volcom_utils.h
 
 $(SYSINFO_SRC_DIR)/volcom_sysinfo.o: $(SYSINFO_SRC_DIR)/volcom_sysinfo.c \
+                                      $(SYSINFO_SRC_DIR)/volcom_sysinfo.h
+
+$(RCSMNGR_SRC_DIR)/volcom_rcsmngr.o: $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.c \
+                                      $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.h \
                                       $(SYSINFO_SRC_DIR)/volcom_sysinfo.h
 

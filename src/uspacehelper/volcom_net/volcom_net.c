@@ -81,7 +81,7 @@ void udp_broadcaster_cleanup() {
     }
 }
 
-void get_local_ip(char* buffer, size_t size) {
+void get_local_ip_n(char* buffer, size_t size) {
     struct ifaddrs *ifaddr, *ifa;
     
     if (getifaddrs(&ifaddr) == -1) {
