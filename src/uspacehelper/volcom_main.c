@@ -289,6 +289,11 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+    printf("Arguments count: %d\n", argc);
+    for (int i = 0; i < argc; i++) {
+        printf("Argument %d: %s\n", i, argv[i]);
+    }
+
     // TODO: Add the main programme to the cgroup.
     if (argc == 5 && strcmp(argv[3], "--file") == 0) {
         config = load_config(argv[4]);
