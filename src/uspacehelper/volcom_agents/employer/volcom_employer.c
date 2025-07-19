@@ -531,7 +531,7 @@ static void distribute_new_tasks(const char* task_file_path) {
             if (add_task_assignment(&assignment) == 0) {
                 current_employee->active_tasks++;
                 printf("[Employer] Task %s queued for %s\n", assignment.task_id, assignment.employee_ip);
-                last_assigned_chunk++; // Move to the next chunk
+                //last_assigned_chunk++; // Move to the next chunk
             } else {
                 printf("[Employer] Failed to queue task %s\n", task_id);
             }

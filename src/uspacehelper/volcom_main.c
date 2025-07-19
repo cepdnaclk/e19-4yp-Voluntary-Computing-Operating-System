@@ -320,7 +320,7 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[2], "employer") == 0){
             printf("[EMPLOYER] Launching in Employer Mode...\n");
             init_agent(AGENT_MODE_EMPLOYER);
-            if (run_employer_mode() != 0) {
+            if (run_employer_mode(NULL) != 0) {
                     fprintf(stderr, "[ERRPR][EMPLOYER] Employer mode failed\n");
             }
             cleanup_agent();

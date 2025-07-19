@@ -3,6 +3,6 @@
 
 #define _GNU_SOURCE
 
-int run_employer_mode(void);
+int run_employer_mode(char* task_files[]);
 
 #endif

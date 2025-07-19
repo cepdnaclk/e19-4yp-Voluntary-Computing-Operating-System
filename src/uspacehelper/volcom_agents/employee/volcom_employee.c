@@ -40,7 +40,7 @@ static agent_status_t employee_status;
 static bool is_node_started = false;
 
 // Forward declaration for the function to be imported
-extern int start_node(const char* config_path);
+// extern int start_node(const char* config_path);
 
 // TODO: Move
 // Signal handler
@@ -273,7 +273,7 @@ static int send_result_to_employer(int sockfd, const result_info_t* result) {
 }
 
 // Handle incoming connections and task requests
-static void handle_persistent_connection(int employer_fd) {
+static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_s *manager) {
     printf("[Employee] Now in persistent communication mode with employer.\n");
 
     is_node_started = false;
@@ -299,7 +299,7 @@ static void handle_persistent_connection(int employer_fd) {
         // 1. Check for incoming data from the employer
         if (activity > 0 && FD_ISSET(employer_fd, &readfds)) {
             cJSON* initial_check = NULL;
-            memset(&task, 0, sizeof(task));
+            //memset(&task, 0, sizeof(task));
 
             if(recv_json_peek(employer_fd, &initial_check) != PROTOCOL_OK) {
                 printf("[Employee] Connection closed by employer.\n");
@@ -334,12 +334,13 @@ static void handle_persistent_connection(int employer_fd) {
                         printf("[Employee] Configuration saved to %s\n", config_filepath);
 
                         // Call the external start_node function
-                        if (start_node(config_filepath) == 0) {
+                        // TODO: 
+                        // if (run_node_in_cgroup(manager) == 0) {
                             printf("[Employee] Node started successfully.\n");
                             is_node_started = true;
-                        } else {
-                            fprintf(stderr, "[Employee] ERROR: Failed to start the node.\n");
-                        }
+                        // } else {
+                        //     fprintf(stderr, "[Employee] ERROR: Failed to start the node.\n");
+                        // }
                     } else {
                         perror("[Employee] Failed to save config file");
                     }
@@ -606,7 +607,7 @@ int run_employee_mode(struct volcom_rcsmngr_s *manager) {
 
         if (mem_percent < RESOURCE_THRESHOLD_PERCENT) {
             // Enter persistent communication loop
-            handle_persistent_connection(employer_fd);
+            handle_persistent_connection(employer_fd, manager);
         } else {
             const char reject_msg[] = "REJECT:HIGH_RESOURCE_USAGE";
             send(employer_fd, reject_msg, strlen(reject_msg), 0);

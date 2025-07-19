@@ -27,8 +27,9 @@ RCSMNGR_SRC_DIR = volcom_rcsmngr
 # Source files
 AGENT_SRCS = $(AGENTS_SRC_DIR)/employer/volcom_employer.c \
               $(AGENTS_SRC_DIR)/employee/volcom_employee.c \
-              $(AGENTS_SRC_DIR)/task_buffer.c \
-              $(AGENTS_SRC_DIR)/result_queue.c
+              $(AGENTS_SRC_DIR)/task_management.c 
+# 			  \
+#               $(AGENTS_SRC_DIR)/result_queue.c
 
 NET_SRCS = $(NET_SRC_DIR)/protocol.c
 
@@ -160,11 +161,11 @@ $(AGENTS_SRC_DIR)/employee_mode.o: $(AGENTS_SRC_DIR)/employee/volcom_employee.c 
                                    $(NET_SRC_DIR)/volcom_net.h \
                                    $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.h
 
-$(AGENTS_SRC_DIR)/task_buffer.o: $(AGENTS_SRC_DIR)/task_buffer.c \
+$(AGENTS_SRC_DIR)/task_management.o: $(AGENTS_SRC_DIR)/task_management.c \
                                  $(AGENTS_SRC_DIR)/volcom_agents.h
 
-$(AGENTS_SRC_DIR)/result_queue.o: $(AGENTS_SRC_DIR)/result_queue.c \
-                                   $(AGENTS_SRC_DIR)/volcom_agents.h
+# $(AGENTS_SRC_DIR)/result_queue.o: $(AGENTS_SRC_DIR)/result_queue.c \
+#                                    $(AGENTS_SRC_DIR)/volcom_agents.h
 
 $(NET_SRC_DIR)/protocol.o: $(NET_SRC_DIR)/protocol.c \
                            $(NET_SRC_DIR)/volcom_net.h
