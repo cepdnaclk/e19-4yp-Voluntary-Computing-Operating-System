@@ -197,3 +197,72 @@ void cleanup_connection(connection_info_t* conn_info) {
         memset(conn_info, 0, sizeof(connection_info_t));
     }
 }
+
+// Function to peek at JSON data from a socket without consuming it
+protocol_status_t recv_json_peek(int sockfd, cJSON** json) {
+    if (!json) return PROTOCOL_ERR;
+
+    uint32_t net_len;
+    ssize_t bytes_read = recv(sockfd, &net_len, sizeof(net_len), MSG_PEEK);
+    if (bytes_read != sizeof(net_len)) {
+        if (bytes_read == 0) return PROTOCOL_CONN_CLOSED;
+        return PROTOCOL_ERR;
+    }
+
+    uint32_t len = ntohl(net_len);
+    if (len > MAX_JSON_SIZE) {
+        return PROTOCOL_ERR;
+    }
+
+    // We need to peek at the length prefix + the data
+    char* buffer = malloc(sizeof(uint32_t) + len + 1);
+    if (!buffer) return PROTOCOL_ERR;
+
+    bytes_read = recv(sockfd, buffer, sizeof(uint32_t) + len, MSG_PEEK);
+    if (bytes_read != (ssize_t)(sizeof(uint32_t) + len)) {
+        free(buffer);
+        return PROTOCOL_ERR;
+    }
+
+    buffer[sizeof(uint32_t) + len] = '\0';
+
+    *json = cJSON_Parse(buffer + sizeof(uint32_t));
+    free(buffer);
+
+    if (!*json) {
+        return PROTOCOL_ERR;
+    }
+
+    return PROTOCOL_OK;
+}
+
+
+// Function to send a UDP broadcast message
+void send_udp_broadcast(const char* message) {
+    int sockfd;
+    struct sockaddr_in broadcast_addr;
+    int broadcast = 1;
+
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("socket");
+        return;
+    }
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
+        perror("setsockopt (SO_BROADCAST)");
+        close(sockfd);
+        return;
+    }
+
+    memset(&broadcast_addr, 0, sizeof(broadcast_addr));
+    broadcast_addr.sin_family = AF_INET;
+    broadcast_addr.sin_port = htons(9876); // Port for volcom discovery
+    broadcast_addr.sin_addr.s_addr = inet_addr("255.255.255.255");
+
+    if (sendto(sockfd, message, strlen(message), 0, (struct sockaddr*)&broadcast_addr, sizeof(broadcast_addr)) < 0) {
+        perror("sendto");
+    }
+
+    close(sockfd);
+}

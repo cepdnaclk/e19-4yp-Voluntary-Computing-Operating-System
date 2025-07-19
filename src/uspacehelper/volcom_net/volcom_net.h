@@ -5,18 +5,27 @@
 #include <stddef.h>
 #include <time.h>
 #include <cjson/cJSON.h>
+#include <pthread.h>
+#include <stdbool.h>
+
+#define MAX_JSON_SIZE 65536
+#define MAX_FILENAME_LEN 256
+#define MAX_EMPLOYEES 100
+#define MAX_TASK_ASSIGNMENTS 1000
 
 // Protocol definitions
 #define PROTOCOL_VERSION 1
 
 typedef enum { 
     PROTOCOL_OK = 0, 
-    PROTOCOL_ERR = -1 
+    PROTOCOL_ERR = -1,
+    PROTOCOL_CONN_CLOSED
 } protocol_status_t;
 
 // Protocol functions
 protocol_status_t send_json(int sockfd, cJSON *json);
 protocol_status_t recv_json(int sockfd, cJSON **json_out);
+protocol_status_t recv_json_peek(int sockfd, cJSON **json_out);
 
 // Metadata creation utilities
 cJSON* create_task_metadata(const char *task_id, const char *chunk_filename, 
