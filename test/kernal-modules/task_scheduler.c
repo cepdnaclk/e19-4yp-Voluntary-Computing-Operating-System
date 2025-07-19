@@ -1,148 +1,109 @@
-#include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/slab.h>
-#include <linux/list.h>
-#include <linux/random.h>
+#include <linux/init.h>
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
+#include "employee_list.h"
+#include "dummy_tasks.h"
 
-#define MAX_DEVICES 3
 #define PROCFS_NAME "volcom_scheduler"
-#define MAX_INPUT 128
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("SPM");
-MODULE_DESCRIPTION("Task Scheduler with procfs command handling");
-MODULE_VERSION("0.5");
-
-enum task_state { QUEUED, RUNNING, COMPLETED };
-
-struct device_info {
-    int id;
-    int load_percent;
-};
-
-struct task {
-    int task_id;
-    int assigned_device;
-    enum task_state state;
-    struct list_head list;
-};
-
-static struct device_info devices[MAX_DEVICES];
-static LIST_HEAD(task_list);
 static struct proc_dir_entry *proc_file;
-static int task_counter = 0;
 
-/* ==== Device Simulation ==== */
-static void simulate_single_device(int i) {
-    devices[i].id = i;
-    get_random_bytes(&devices[i].load_percent, sizeof(int));
-    devices[i].load_percent %= 101;
-}
+#define MAX_PROC_SIZE 1024
+static char procfs_buffer[MAX_PROC_SIZE];
+static unsigned long procfs_buffer_size = 0;
 
-static void simulate_device_status(void) {
-    int i;
-    for (i = 0; i < MAX_DEVICES; i++) {
-        simulate_single_device(i);
-    }
-}
+static ssize_t proc_write(struct file *file, const char __user *buffer,
+                          size_t count, loff_t *pos) {
+    procfs_buffer_size = count;
+    if (procfs_buffer_size > MAX_PROC_SIZE)
+        procfs_buffer_size = MAX_PROC_SIZE;
 
-static int find_least_loaded_device(void) {
-    int i, min = 101, selected = -1;
-    for (i = 0; i < MAX_DEVICES; i++) {
-        if (devices[i].load_percent < min) {
-            min = devices[i].load_percent;
-            selected = i;
-        }
-    }
-    return selected;
-}
-
-/* ==== Task Handling ==== */
-static void schedule_task(void) {
-    struct task *new_task = kmalloc(sizeof(struct task), GFP_KERNEL);
-    if (!new_task) return;
-
-    new_task->task_id = task_counter++;
-    new_task->assigned_device = find_least_loaded_device();
-    new_task->state = QUEUED;
-    list_add_tail(&new_task->list, &task_list);
-
-    printk(KERN_INFO "Task %d assigned to device %d [QUEUED]\n",
-           new_task->task_id, new_task->assigned_device);
-}
-
-/* ==== procfs write handler ==== */
-static ssize_t scheduler_write(struct file *file, const char __user *buffer,
-                               size_t count, loff_t *ppos) {
-    char input[MAX_INPUT];
-
-    if (count >= MAX_INPUT)
-        return -EINVAL;
-
-    if (copy_from_user(input, buffer, count))
+    if (copy_from_user(procfs_buffer, buffer, procfs_buffer_size))
         return -EFAULT;
 
-    input[count] = '\0';
+    procfs_buffer[procfs_buffer_size] = '\0';
 
-    if (strncmp(input, "submit", 6) == 0) {
-        schedule_task();
-    } else if (strncmp(input, "list", 4) == 0) {
-        struct task *t;
-        list_for_each_entry(t, &task_list, list) {
-            printk(KERN_INFO "Task %d on Device %d [%s]\n",
-                   t->task_id, t->assigned_device,
-                   (t->state == QUEUED ? "QUEUED" :
-                    t->state == RUNNING ? "RUNNING" : "COMPLETED"));
+    if (strncmp(procfs_buffer, "schedule", 8) == 0) {
+        printk(KERN_INFO "volcom: Task scheduling started...\n");
+
+        EmployeeNodeWrapper *device = get_candidate_list();
+
+        if (!device) {
+            printk(KERN_INFO "volcom: No candidate devices found.\n");
+            return count;
         }
-    } else if (strncmp(input, "clear", 5) == 0) {
-        struct task *t, *tmp;
-        list_for_each_entry_safe(t, tmp, &task_list, list) {
-            printk(KERN_INFO "Clearing Task %d\n", t->task_id);
-            list_del(&t->list);
-            kfree(t);
+
+        for (int i = 0; i < global_task_count; ++i) {
+            task_info_s task = global_task_list[i];
+
+            // Choose best device (least CPU usage and enough memory)
+            EmployeeNodeWrapper *best = NULL;
+            unsigned int best_score = 999999;  // large number for initial comparison
+
+            EmployeeNodeWrapper *curr = device;
+            while (curr) {
+                if (curr->data.free_mem_mb >= task.memory_usage) {
+                    unsigned int score = (unsigned int)curr->data.cpu_usage_percent;
+                    if (score < best_score) {
+                        best_score = score;
+                        best = curr;
+                    }
+                }
+                curr = curr->next;
+            }
+
+            if (best) {
+                printk(KERN_INFO "volcom: Assigned Task[%d] '%s' to Device[%s] (CPU %lu%%, MEM %luMB)\n",
+                       task.task_id, task.task_name,
+                       best->data.ip,
+                       best->data.cpu_usage_percent,
+                       best->data.free_mem_mb);
+            } else {
+                printk(KERN_INFO "volcom: Could not assign Task[%d] '%s' — no suitable device.\n",
+                       task.task_id, task.task_name);
+            }
         }
-        task_counter = 0;
-    } else {
-        printk(KERN_INFO "Invalid command. Use 'submit', 'list', or 'clear'\n");
+
+        // Free device list memory
+        while (device) {
+            EmployeeNodeWrapper *temp = device;
+            device = device->next;
+            kfree(temp);
+        }
+
+        return count;
     }
 
+    printk(KERN_INFO "volcom: Unknown command in /proc file: %s\n", procfs_buffer);
     return count;
 }
 
 static const struct proc_ops proc_file_ops = {
-    .proc_write = scheduler_write,
+    .proc_write = proc_write
 };
 
-/* ==== Module Init/Exit ==== */
 static int __init scheduler_init(void) {
-    printk(KERN_INFO "Task Scheduler with procfs command interface\n");
-    simulate_device_status();
-
     proc_file = proc_create(PROCFS_NAME, 0666, NULL, &proc_file_ops);
     if (!proc_file) {
-        printk(KERN_ERR "Failed to create /proc/%s\n", PROCFS_NAME);
+        printk(KERN_ALERT "volcom: Failed to create /proc/%s\n", PROCFS_NAME);
         return -ENOMEM;
     }
 
+    printk(KERN_INFO "volcom: Task Scheduler Module Loaded\n");
     return 0;
 }
 
 static void __exit scheduler_exit(void) {
-    struct task *t, *tmp;
-    list_for_each_entry_safe(t, tmp, &task_list, list) {
-        list_del(&t->list);
-        kfree(t);
-    }
-
-    if (proc_file)
-        proc_remove(proc_file);
-
-    printk(KERN_INFO "Task Scheduler cleaned up\n");
+    proc_remove(proc_file);
+    printk(KERN_INFO "volcom: Task Scheduler Module Removed\n");
 }
 
 module_init(scheduler_init);
 module_exit(scheduler_exit);
 
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Your Name");
+MODULE_DESCRIPTION("Dummy Task Scheduler Kernel Module");
