@@ -87,7 +87,37 @@ typedef struct employee_node_s {
     employee_state_t state; // Current state of the employee
 } employee_node_t;
 
-// Task assignment structure for employers
+// Structure to hold information about a task result to be sent
+typedef struct {
+    char task_id[MAX_FILENAME_LEN];
+    char result_filepath[MAX_FILENAME_LEN];
+    char employer_ip[INET_ADDRSTRLEN];
+} result_info_t;
+
+// A simple circular buffer for received tasks
+typedef struct task_buffer_s {
+    received_task_t* tasks;
+    int capacity;
+    int head;
+    int tail;
+    int count;
+    pthread_mutex_t mutex;
+} task_buffer_t;
+
+// A simple circular queue for results waiting to be sent
+typedef struct {
+    result_info_t* results;
+    int capacity;
+    int head;
+    int tail;
+    int count;
+    pthread_mutex_t mutex;
+    pthread_cond_t not_empty;
+    pthread_cond_t not_full;
+} result_queue_t;
+
+
+// Structure to hold information about a task assignment
 typedef struct {
     char task_id[64];
     char chunk_file[256];
@@ -120,8 +150,8 @@ int get_task_from_buffer(struct task_buffer_s* buffer, received_task_t* task);
 
 int init_result_queue(result_queue_t* queue, int capacity);
 void cleanup_result_queue(result_queue_t* queue);
-// int add_result_to_queue(result_queue_t* queue, const result_info_t* result);
-// int get_result_from_queue(result_queue_t* queue, result_info_t* result);
+int add_result_to_queue(result_queue_t* queue, const result_info_t* result);
+int get_result_from_queue(result_queue_t* queue, result_info_t* result);
 bool is_result_queue_empty(const result_queue_t* queue);
 
 // Hybrid mode placeholder
