@@ -35,15 +35,13 @@ static int receive_task_from_employer(int sockfd, received_task_t* task);
 static bool employee_running = false;
 static pthread_t broadcaster_thread;
 static pthread_t worker_thread;
-static task_buffer_t task_buffer;
 static result_queue_t result_queue; // Global result queue
 static agent_status_t employee_status;
 static bool is_node_started = false;
 static bool unix_socket_connected = false;
 
-// Buffers for data chunks and results
+// Buffer for data chunks
 static task_buffer_t data_chunk_buffer; // Buffer for incoming data chunks
-static result_queue_t node_result_queue; // Buffer for results from node script
 
 // TODO: Move to a config file
 struct unix_socket_config_s client_socket_config = {
@@ -52,10 +50,9 @@ struct unix_socket_config_s client_socket_config = {
     .timeout_sec = 5
 };
 
-// Forward declaration for the function to be imported
-// extern int start_node(const char* config_path);
-
-// TODO: Move
+// ============================================================================
+// SIGNAL HANDLING & UTILITY FUNCTIONS
+// ============================================================================
 // Signal handler
 static void employee_signal_handler(int sig) {
     (void)sig;
@@ -125,16 +122,16 @@ static void* broadcast_loop(void* arg) {
     return NULL;
 }
 
-// ###########################################################################
+// ============================================================================
+// CORE WORKER THREAD - PROCESSES DATA CHUNKS VIA UNIX SOCKET
+// ============================================================================
 
-// ###########################################################################
-
-// Worker thread to process tasks and communicate with node script
+// Worker thread to process data chunks and communicate with node script
 static void* worker_loop(void* arg) {
     (void)arg;
     
     while (employee_running) {
-        // 1. If node is started and unix socket is connected, send buffered data chunks
+        // Send buffered data chunks to node script when ready
         if (is_node_started && unix_socket_connected) {
             received_task_t data_chunk;
             
@@ -142,74 +139,56 @@ static void* worker_loop(void* arg) {
             if (get_task_from_buffer(&data_chunk_buffer, &data_chunk) == 0) {
                 printf("[Employee] Sending data chunk %s to node script via Unix socket\n", data_chunk.task_id);
                 
-                // Create JSON message to send to node script
-                cJSON *json_message = cJSON_CreateObject();
-                cJSON_AddStringToObject(json_message, "type", "data_chunk");
-                cJSON_AddStringToObject(json_message, "task_id", data_chunk.task_id);
-                cJSON_AddStringToObject(json_message, "filename", data_chunk.chunk_filename);
-                cJSON_AddNumberToObject(json_message, "data_size", data_chunk.data_size);
-                
-                // Convert JSON to string
-                char *json_string = cJSON_Print(json_message);
-                if (json_string) {
-                    // Send JSON message to node script
-                    if (unix_socket_client_send_message(json_string)) {
-                        printf("[Employee] Data chunk metadata sent to node script\n");
+                // Send the actual file data to the node script
+                if (unix_socket_client_send_message((char*)data_chunk.data)) {
+                    printf("[Employee] Data chunk file content sent to node script\n");
+                    
+                    // Wait for response from node script
+                    char response[4096];
+                    ssize_t bytes = unix_socket_client_receive_message(response, sizeof(response));
+                    if (bytes > 0) {
+                        printf("[Employee] Node script response: %s\n", response);
                         
-                        // Wait for response from node script
-                        char response[4096];
-                        ssize_t bytes = unix_socket_client_receive_message(response, sizeof(response));
-                        if (bytes > 0) {
-                            printf("[Employee] Node script response: %s\n", response);
+                        // Parse response and add to result queue
+                        cJSON *response_json = cJSON_Parse(response);
+                        if (response_json) {
+                            const cJSON *status = cJSON_GetObjectItem(response_json, "status");
                             
-                            // Parse response and add to result queue
-                            cJSON *response_json = cJSON_Parse(response);
-                            if (response_json) {
-                                const cJSON *status = cJSON_GetObjectItem(response_json, "status");
-                                // const cJSON *result_data = cJSON_GetObjectItem(response_json, "result");
+                            if (status && cJSON_IsString(status)) {
+                                // Create result info
+                                result_info_t result_info;
+                                strncpy(result_info.task_id, data_chunk.task_id, sizeof(result_info.task_id) - 1);
+                                strncpy(result_info.employer_ip, data_chunk.sender_id, sizeof(result_info.employer_ip) - 1);
                                 
-                                if (status && cJSON_IsString(status)) {
-                                    // Create result info
-                                    result_info_t result_info;
-                                    strncpy(result_info.task_id, data_chunk.task_id, sizeof(result_info.task_id) - 1);
-                                    strncpy(result_info.employer_ip, data_chunk.sender_id, sizeof(result_info.employer_ip) - 1);
+                                // Create result file
+                                char result_filename[512];
+                                snprintf(result_filename, sizeof(result_filename), "/tmp/node_result_%s.json", data_chunk.task_id);
+                                
+                                FILE *result_file = fopen(result_filename, "w");
+                                if (result_file) {
+                                    fprintf(result_file, "%s", response);
+                                    fclose(result_file);
                                     
-                                    // Create result file
-                                    char result_filename[512];
-                                    snprintf(result_filename, sizeof(result_filename), "/tmp/node_result_%s.json", data_chunk.task_id);
+                                    strncpy(result_info.result_filepath, result_filename, sizeof(result_info.result_filepath) - 1);
                                     
-                                    FILE *result_file = fopen(result_filename, "w");
-                                    if (result_file) {
-                                        fprintf(result_file, "%s", response);
-                                        fclose(result_file);
-                                        
-                                        strncpy(result_info.result_filepath, result_filename, sizeof(result_info.result_filepath) - 1);
-                                        
-                                        // Add to result queue for sending back to employer
-                                        if (add_result_to_queue(&result_queue, &result_info) == 0) {
-                                            printf("[Employee] Node script result for task %s queued for sending to employer\n", data_chunk.task_id);
-                                        } else {
-                                            printf("[Employee] Failed to queue node script result for task %s\n", data_chunk.task_id);
-                                        }
+                                    // Add to result queue for sending back to employer
+                                    if (add_result_to_queue(&result_queue, &result_info) == 0) {
+                                        printf("[Employee] Node script result for task %s queued for sending to employer\n", data_chunk.task_id);
+                                    } else {
+                                        printf("[Employee] Failed to queue node script result for task %s\n", data_chunk.task_id);
                                     }
                                 }
-                                cJSON_Delete(response_json);
                             }
-                        } else {
-                            printf("[Employee] Failed to receive response from node script\n");
+                            cJSON_Delete(response_json);
                         }
                     } else {
-                        printf("[Employee] Failed to send data chunk to node script, re-queuing\n");
-                        // Re-add to buffer for retry
-                        add_task_to_buffer(&data_chunk_buffer, &data_chunk);
+                        printf("[Employee] Failed to receive response from node script\n");
                     }
-                    
-                    free(json_string);
                 } else {
-                    printf("[Employee] Failed to create JSON message for data chunk\n");
+                    printf("[Employee] Failed to send data chunk to node script, re-queuing\n");
+                    // Re-add to buffer for retry
+                    add_task_to_buffer(&data_chunk_buffer, &data_chunk);
                 }
-                
-                cJSON_Delete(json_message);
                 
                 // Clean up data chunk
                 if (data_chunk.data) {
@@ -218,87 +197,8 @@ static void* worker_loop(void* arg) {
             }
         }
         
-        // 2. Process any regular tasks (if needed for backward compatibility)
-        received_task_t task;
-        if (get_task_from_buffer(&task_buffer, &task) == 0) {
-            printf("[Employee] Processing regular task: %s\n", task.task_id);
-            
-            // Regular task processing logic (existing code)
-            printf("[Employee] Task %s: Processing file %s...\n", task.task_id, task.chunk_filename);
-            
-            char success_message[] = "{"
-                "\"status\": \"success\","
-                "\"message\": \"Data saved successfully from C client\","
-                "\"timestamp\": \"2025-07-18T12:00:00Z\","
-                "\"file\": \"img_1721304000.bin\","
-                "\"size\": 1024"
-            "}";
-            
-            if (unix_socket_connected && unix_socket_client_send_message(success_message)) {
-                printf("Success message sent!\n");
-                
-                // Receive response
-                char response[1024];
-                ssize_t bytes = unix_socket_client_receive_message(response, sizeof(response));
-                if (bytes > 0) {
-                    printf("JavaScript server response: %s\n", response);
-                }
-            } else {
-                printf("Unix socket not connected or failed to send message\n");
-            }
-    
-            if (!employee_running) {
-                printf("[Employee] Task %s interrupted due to shutdown\n", task.task_id);
-                break;
-            }
-            
-            // Mark task as processed and create result
-            task.is_processed = true;
-            
-            // Create result file (for demonstration)
-            char result_filename[512];
-            snprintf(result_filename, sizeof(result_filename), "/tmp/result_%s.txt", task.task_id);
-            
-            FILE *result_file = fopen(result_filename, "w");
-            if (result_file) {
-                fprintf(result_file, "Task ID: %s\n", task.task_id);
-                fprintf(result_file, "Original file: %s\n", task.chunk_filename);
-                fprintf(result_file, "File size: %zu bytes\n", task.data_size);
-                fprintf(result_file, "Processed by: %s\n", employee_status.agent_id);
-                fprintf(result_file, "Completed at: %ld\n", time(NULL));
-                
-                // Echo back the original file content (as an example)
-                if (task.data) {
-                    fprintf(result_file, "\n--- Original Content ---\n");
-                    fwrite(task.data, 1, task.data_size, result_file);
-                    fprintf(result_file, "\n--- End Original Content ---\n");
-                }
-                
-                fclose(result_file);
-                printf("[Employee] Result saved to: %s\n", result_filename);
-
-                // Add result to the queue for sending
-                result_info_t result_info;
-                strncpy(result_info.task_id, task.task_id, sizeof(result_info.task_id) - 1);
-                strncpy(result_info.result_filepath, result_filename, sizeof(result_info.result_filepath) - 1);
-                strncpy(result_info.employer_ip, task.sender_id, sizeof(result_info.employer_ip) - 1);
-                
-                if (add_result_to_queue(&result_queue, &result_info) == 0) {
-                    printf("[Employee] Result for task %s queued for sending.\n", task.task_id);
-                } else {
-                    printf("[Employee] Failed to queue result for task %s.\n", task.task_id);
-                }
-            }
-            
-            // Clean up task data
-            if (task.data) {
-                free(task.data);
-            }
-        }
-        
-        // 3. Sleep briefly if no tasks to process
-        if (!is_node_started || !unix_socket_connected || 
-            (is_task_buffer_empty(&data_chunk_buffer) && is_task_buffer_empty(&task_buffer))) {
+        // Sleep briefly if no tasks to process
+        if (!is_node_started || !unix_socket_connected || is_task_buffer_empty(&data_chunk_buffer)) {
             usleep(100000); // 100ms
         }
     }
@@ -307,7 +207,9 @@ static void* worker_loop(void* arg) {
     return NULL;
 }
 
-// Send result back to employer using the persistent connection
+// ============================================================================
+// RESULT TRANSMISSION TO EMPLOYER
+// ============================================================================
 static int send_result_to_employer(int sockfd, const result_info_t* result) {
     if (sockfd < 0 || !result) {
         return -1;
@@ -375,6 +277,9 @@ static int send_result_to_employer(int sockfd, const result_info_t* result) {
     return 0;
 }
 
+// ============================================================================
+// THREAD FUNCTIONS FOR FILE OPERATIONS AND NODE MANAGEMENT
+// ============================================================================
 
 // Helper structs for threads
 typedef struct {
@@ -456,7 +361,9 @@ void* start_node_thread(void* arg) {
     return NULL;
 }
 
-// Handle incoming connections and task requests
+// ============================================================================
+// COMMUNICATION HANDLING WITH EMPLOYER
+// ============================================================================
 static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_s *manager) {
     printf("[Employee] Now in persistent communication mode with employer.\n");
     is_node_started = false;
@@ -672,7 +579,9 @@ static int receive_task_from_employer(int sockfd, received_task_t* task) {
     return 0;
 }
 
-// Employee mode main function
+// ============================================================================
+// MAIN EMPLOYEE MODE FUNCTION
+// ============================================================================
 int run_employee_mode(struct volcom_rcsmngr_s *manager) {
 
     printf("[Employee] Starting Employee Mode...\n");
@@ -682,33 +591,16 @@ int run_employee_mode(struct volcom_rcsmngr_s *manager) {
         return -1;
     }
 
-    // Initialize task buffer
-    if (init_task_buffer(&task_buffer, 10) != 0) {
-        fprintf(stderr, "Failed to initialize task buffer\n");
-        return -1;
-    }
-
     // Initialize data chunk buffer
     if (init_task_buffer(&data_chunk_buffer, 50) != 0) {
         fprintf(stderr, "Failed to initialize data chunk buffer\n");
-        cleanup_task_buffer(&task_buffer);
         return -1;
     }
 
     // Initialize result queue
     if (init_result_queue(&result_queue, 10) != 0) {
         fprintf(stderr, "Failed to initialize result queue\n");
-        cleanup_task_buffer(&task_buffer);
         cleanup_task_buffer(&data_chunk_buffer);
-        return -1;
-    }
-
-    // Initialize node result queue
-    if (init_result_queue(&node_result_queue, 50) != 0) {
-        fprintf(stderr, "Failed to initialize node result queue\n");
-        cleanup_task_buffer(&task_buffer);
-        cleanup_task_buffer(&data_chunk_buffer);
-        cleanup_result_queue(&result_queue);
         return -1;
     }
 
@@ -743,7 +635,7 @@ int run_employee_mode(struct volcom_rcsmngr_s *manager) {
     if (pthread_create(&broadcaster_thread, NULL, broadcast_loop, NULL) != 0) {
         perror("Failed to create broadcaster thread");
         employee_running = false;
-        cleanup_task_buffer(&task_buffer);
+        cleanup_task_buffer(&data_chunk_buffer);
         return -1;
     }
 
@@ -752,7 +644,7 @@ int run_employee_mode(struct volcom_rcsmngr_s *manager) {
         perror("Failed to create worker thread");
         employee_running = false;
         pthread_cancel(broadcaster_thread);
-        cleanup_task_buffer(&task_buffer);
+        cleanup_task_buffer(&data_chunk_buffer);
         return -1;
     }
 
@@ -765,7 +657,7 @@ int run_employee_mode(struct volcom_rcsmngr_s *manager) {
         employee_running = false;
         pthread_cancel(broadcaster_thread);
         pthread_cancel(worker_thread);
-        cleanup_task_buffer(&task_buffer);
+        cleanup_task_buffer(&data_chunk_buffer);
         return -1;
     }
 
@@ -815,62 +707,16 @@ int run_employee_mode(struct volcom_rcsmngr_s *manager) {
         unix_socket_connected = false;
     }
 
-    cleanup_task_buffer(&task_buffer);
     cleanup_task_buffer(&data_chunk_buffer);
     cleanup_result_queue(&result_queue);
-    cleanup_result_queue(&node_result_queue);
 
     printf("[Employee] Employee mode stopped\n");
     return 0;
 }
 
-// Employee-specific function implementations
-int start_resource_broadcasting(void) {
-    if (!employee_running) {
-        return pthread_create(&broadcaster_thread, NULL, broadcast_loop, NULL);
-    }
-    return 0; // Already running
-}
-
-int stop_resource_broadcasting(void) {
-    if (employee_running) {
-        pthread_cancel(broadcaster_thread);
-        return 0;
-    }
-    return -1;
-}
-
-int listen_for_tasks(void) {
-    // This functionality is integrated into the main employee loop
-    return 0;
-}
-
-int process_received_task(const received_task_t* task) {
-    if (!task) return -1;
-    
-    printf("[Employee] Processing task %s\n", task->task_id);
-    
-    // Placeholder processing logic
-    // In a real implementation, this would:
-    // 1. Execute the task
-    // 2. Generate results
-    // 3. Prepare results for sending back
-    
-    return 0;
-}
-
-int send_task_result(const char* task_id, const char* result_file) {
-    if (!task_id || !result_file) return -1;
-    
-    printf("[Employee] Sending result for task %s from file %s\n", task_id, result_file);
-    
-    // Placeholder implementation
-    // In practice, this would connect to the employer and send the result
-    
-    return 0;
-}
-
-// Hybrid mode placeholder
+// ============================================================================
+// CGROUP MANAGEMENT FOR NODE PROCESSES
+// ============================================================================
 int run_hybrid_mode(void) {
     printf("Hybrid mode not yet implemented\n");
     return -1;
