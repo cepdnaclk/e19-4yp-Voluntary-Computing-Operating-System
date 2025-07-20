@@ -2,6 +2,8 @@
 #include "volcom_agents/employee/volcom_employee.h"
 #include "volcom_sysinfo/volcom_sysinfo.h"
 #include "volcom_rcsmngr/volcom_rcsmngr.h"
+#include "volcom_scheduler/volcom_scheduler.h"
+#include "volcom_agents/volcom_agents.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -317,14 +319,18 @@ int main(int argc, char *argv[]) {
     if (strcmp(argv[1], "--mode") == 0) {
         if (strcmp(argv[2], "employer") == 0){
             printf("[EMPLOYER] Launching in Employer Mode...\n");
-            if (run_employer_mode() != 0) {
+            init_agent(AGENT_MODE_EMPLOYER);
+            if (run_employer_mode(NULL) != 0) {
                     fprintf(stderr, "[ERRPR][EMPLOYER] Employer mode failed\n");
             }
+            cleanup_agent();
         } else{
             printf("[EMPLOYEE] Launching in Employee Mode...\n");
+            init_agent(AGENT_MODE_EMPLOYEE);
             if (run_employee_mode(&manager) != 0) {
                 fprintf(stderr, "[ERRPR][EMPLOYEE] Employee mode failed\n");
             }
+            cleanup_agent();
         }
     }
     

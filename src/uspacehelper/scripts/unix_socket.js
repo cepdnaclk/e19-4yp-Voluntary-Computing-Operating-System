@@ -8,7 +8,7 @@ const SOCKET_PATH = '/tmp/volcom_unix_socket';
 if (fs.existsSync(SOCKET_PATH)) fs.unlinkSync(SOCKET_PATH);
 
 const server = net.createServer((socket) => {
-    console.log('Client connected to Unix socket server');
+    console.log('[NODE] Client connected to Unix socket server');
     
     let buffer = Buffer.alloc(0);
 
@@ -36,27 +36,27 @@ const server = net.createServer((socket) => {
     });
 
     socket.on('end', () => {
-        console.log('Client disconnected from Unix socket server');
+        console.log('[NODE] Client disconnected from Unix socket server');
     });
 
     socket.on('error', (err) => {
-        console.error('Socket error:', err);
+        console.error('[ERROR][NODE] Socket error:', err);
     });
 });
 
 server.listen(SOCKET_PATH, () => {
-    console.log(`Unix Socket Server listening on ${SOCKET_PATH}`);
+    console.log(`[NODE] Unix Socket Server listening on ${SOCKET_PATH}`);
 });
 
 function processMessage(message, socket) {
-    console.log('Received message:', message);
+    console.log('[NODE] Received message:', message);
     
     try {
         // Try to parse as JSON first
         const data = JSON.parse(message);
         
         if (data.status === 'success') {
-            console.log('Processing success message:', data.message);
+            console.log('[NODE] Processing success message:', data.message);
             
             // Send acknowledgment back to client
             const response = {
@@ -79,7 +79,7 @@ function processMessage(message, socket) {
 }
 
 function processJsonData(data, socket) {
-    console.log('Processing JSON data:', data);
+    console.log('[NODE] Processing JSON data:', data);
     
     const response = {
         status: 'received',
@@ -107,14 +107,14 @@ function processBinaryData(dataPoint, socket) {
             size: dataPoint.length
         };
         
-        console.log('Sending success message:', successMessage);
+        console.log('[NODE] Sending success message:', successMessage);
         
         // Send success message back to the client
         socket.write(JSON.stringify(successMessage));
         
     } catch (error) {
-        console.error('Error saving file:', error);
-        
+        console.error('[ERROR][NODE] Error saving file:', error);
+
         const errorMessage = {
             status: 'error',
             message: 'Failed to save data',
@@ -128,7 +128,7 @@ function processBinaryData(dataPoint, socket) {
 
 // Handle server shutdown
 process.on('SIGINT', () => {
-    console.log('\nShutting down Unix socket server...');
+    console.log('[NODE] Shutting down Unix socket server...');
     server.close(() => {
         if (fs.existsSync(SOCKET_PATH)) {
             fs.unlinkSync(SOCKET_PATH);
@@ -138,7 +138,7 @@ process.on('SIGINT', () => {
 });
 
 process.on('SIGTERM', () => {
-    console.log('\nShutting down Unix socket server...');
+    console.log('[NODE] Shutting down Unix socket server...');
     server.close(() => {
         if (fs.existsSync(SOCKET_PATH)) {
             fs.unlinkSync(SOCKET_PATH);
