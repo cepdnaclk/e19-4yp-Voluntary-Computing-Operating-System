@@ -49,6 +49,13 @@ int get_task_from_buffer(task_buffer_t* buffer, received_task_t* task) {
     return 0;
 }
 
+bool is_task_buffer_empty(const task_buffer_t* buffer) {
+    pthread_mutex_lock((pthread_mutex_t*)&buffer->mutex);
+    bool is_empty = (buffer->count == 0);
+    pthread_mutex_unlock((pthread_mutex_t*)&buffer->mutex);
+    return is_empty;
+}
+
 // Result Queue Implementation
 int init_result_queue(result_queue_t* queue, int capacity) {
     if (!queue) return -1;
