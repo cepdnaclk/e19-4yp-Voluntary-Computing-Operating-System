@@ -24,7 +24,7 @@
 #define RESOURCE_THRESHOLD_PERCENT 80.0
 #define EMPLOYEE_PORT 12345
 
-int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path, const char *data_point);
+int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path);
 
 // Forward declarations
 static int send_result_to_employer(int sockfd, const result_info_t* result);
@@ -326,7 +326,7 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
                 if (receive_task_from_employer(employer_fd, &config_task) == 0) {
                     // Save the config file and start the node
                     char config_filepath[512];
-                    snprintf(config_filepath, sizeof(config_filepath), "/tmp/config_%s.sh", config_task.task_id);
+                    snprintf(config_filepath, sizeof(config_filepath), "/tmp/config_%s.js", config_task.task_id);
                     FILE* f = fopen(config_filepath, "wb");
 
                     if(f) {
@@ -336,12 +336,12 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
 
                         // Call the external start_node function
                         // TODO: 
-                        // if (run_node_in_cgroup(manager) == 0) {
+                        if (run_node_in_cgroup(manager, config_task.task_id, config_filepath) == 0) {
                             printf("[Employee] Node started successfully.\n");
                             is_node_started = true;
-                        // } else {
-                        //     fprintf(stderr, "[Employee] ERROR: Failed to start the node.\n");
-                        // }
+                        } else {
+                            fprintf(stderr, "[Employee] ERROR: Failed to start the node.\n");
+                        }
                     } else {
                         perror("[Employee] Failed to save config file");
                     }
@@ -352,6 +352,7 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
                 }
             } else if (strcmp(msg_type, "data_chunk") == 0) {
                 if (!is_node_started) {
+                    // TODO: Why ??? cann't we use buffer
                     printf("[Employee] Warning: Received data chunk before node was configured. Ignoring.\n");
                     // Discard the message fully
                     received_task_t temp_task;
@@ -684,7 +685,7 @@ int run_hybrid_mode(void) {
     return -1;
 }
 
-int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path, const char *data_point) {
+int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, const char *script_path) {
 
     pid_t pid = fork();
 
@@ -695,7 +696,7 @@ int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, 
 
     if (pid == 0) {
         // Child process - execute Node.js script with data point as argument
-        printf("Child process %d starting Node.js task: %s with data: %s\n", getpid(), task_name, data_point);
+        printf("Child process %d starting Node.js task: %s \n", getpid(), task_name);
         execlp("node", "node", script_path);
         perror("execlp failed - Node.js not found or script error");
         exit(1);
