@@ -22,6 +22,7 @@ typedef struct received_task_s {
     size_t data_size;
     time_t received_time;
     bool is_processed;
+    int frame_no; // Frame number for image/video tasks, -1 if not provided
 } received_task_t;
 
 // Agent modes

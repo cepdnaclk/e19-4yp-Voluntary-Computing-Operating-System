@@ -480,20 +480,21 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
 // Proper task reception from employer
 static int receive_task_from_employer(int sockfd, received_task_t* task) {
     if (!task) return -1;
-    
+
     // Receive task metadata (JSON)
     cJSON *metadata = NULL;
     if (recv_json(sockfd, &metadata) != PROTOCOL_OK) {
         printf("[Employee] Failed to receive task metadata\n");
         return -1;
     }
-    
+
     // Parse metadata
     const cJSON *task_id = cJSON_GetObjectItem(metadata, "task_id");
     const cJSON *chunk_filename = cJSON_GetObjectItem(metadata, "chunk_filename");
     const cJSON *sender_id = cJSON_GetObjectItem(metadata, "sender_id");
     const cJSON *message_type = cJSON_GetObjectItem(metadata, "message_type");
-    
+    const cJSON *frame_no = cJSON_GetObjectItem(metadata, "frame_no");
+
     if (!task_id || !cJSON_IsString(task_id) ||
         !chunk_filename || !cJSON_IsString(chunk_filename) ||
         !sender_id || !cJSON_IsString(sender_id) ||
@@ -502,33 +503,38 @@ static int receive_task_from_employer(int sockfd, received_task_t* task) {
         cJSON_Delete(metadata);
         return -1;
     }
-    
+
     // Copy metadata to task structure
     strncpy(task->task_id, task_id->valuestring, sizeof(task->task_id) - 1);
     strncpy(task->chunk_filename, chunk_filename->valuestring, sizeof(task->chunk_filename) - 1);
     strncpy(task->sender_id, sender_id->valuestring, sizeof(task->sender_id) - 1);
     task->received_time = time(NULL);
     task->is_processed = false;
-    
-    printf("[Employee] Receiving task: %s, file: %s\n", task->task_id, task->chunk_filename);
-    
+    if (frame_no && cJSON_IsNumber(frame_no)) {
+        task->frame_no = frame_no->valueint;
+    } else {
+        task->frame_no = -1; // Unknown or not provided
+    }
+
+    printf("[Employee] Receiving task: %s, file: %s, frame_no: %d\n", task->task_id, task->chunk_filename, task->frame_no);
+
     cJSON_Delete(metadata);
-    
+
     // Receive file size
     uint32_t net_size;
     if (recv(sockfd, &net_size, sizeof(net_size), MSG_WAITALL) != sizeof(net_size)) {
         printf("[Employee] Failed to receive file size\n");
         return -1;
     }
-    
+
     uint32_t file_size = ntohl(net_size);
     printf("[Employee] Expecting file of size: %u bytes\n", file_size);
-    
+
     if (file_size == 0 || file_size > 100 * 1024 * 1024) { // Max 100MB
         printf("[Employee] Invalid file size: %u\n", file_size);
         return -1;
     }
-    
+
     // Allocate memory for file data
     task->data = malloc(file_size);
     if (!task->data) {
@@ -536,15 +542,15 @@ static int receive_task_from_employer(int sockfd, received_task_t* task) {
         return -1;
     }
     task->data_size = file_size;
-    
+
     // Receive file content
     size_t total_received = 0;
     char *data_ptr = (char*)task->data;
-    
+
     while (total_received < file_size) {
         size_t remaining = file_size - total_received;
         size_t to_receive = remaining < 4096 ? remaining : 4096;
-        
+
         ssize_t bytes_received = recv(sockfd, data_ptr + total_received, to_receive, 0);
         if (bytes_received <= 0) {
             printf("[Employee] Failed to receive file data (received %zu/%u bytes)\n", 
@@ -553,29 +559,29 @@ static int receive_task_from_employer(int sockfd, received_task_t* task) {
             task->data = NULL;
             return -1;
         }
-        
+
         total_received += bytes_received;
     }
-    
+
     printf("[Employee] Successfully received task file: %s (%u bytes)\n", 
            task->task_id, file_size);
-    
+
     // Save file to local storage
     char local_filename[512];
     snprintf(local_filename, sizeof(local_filename), "/tmp/employee_task_%s", task->task_id);
-    
+
     FILE *local_file = fopen(local_filename, "wb");
     if (local_file) {
         fwrite(task->data, 1, file_size, local_file);
         fclose(local_file);
         printf("[Employee] Task file saved as: %s\n", local_filename);
-        
+
         // Update chunk_filename to point to local file
         strncpy(task->chunk_filename, local_filename, sizeof(task->chunk_filename) - 1);
     } else {
         printf("[Employee] Warning: Could not save task file locally\n");
     }
-    
+
     return 0;
 }
 

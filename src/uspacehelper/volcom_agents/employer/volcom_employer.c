@@ -559,7 +559,7 @@ void populate_chunked_tasks() {
     }
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        if (strstr(entry->d_name, ".json")) {
+        if (strstr(entry->d_name, ".png")) {
             char filepath[512];
             snprintf(filepath, sizeof(filepath), "%s/%s", CHUNKED_SET_PATH, entry->d_name);
 
