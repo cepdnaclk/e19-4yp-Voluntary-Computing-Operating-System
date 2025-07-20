@@ -27,8 +27,8 @@
 #define BUFFER_SIZE 2048
 #define STALE_THRESHOLD 15
 #define MAX_EMPLOYEES 100
-#define CHUNKED_SET_PATH "/home/dasun/Projects/e19-4yp-Voluntary-Computing-Operating-System/src/uspacehelper/scripts"
-#define RESULTS_PATH "/home/dasun/Projects/e19-4yp-Voluntary-Computing-Operating-System/src/uspacehelper/results"
+#define CHUNKED_SET_PATH "/home/geeth99/Desktop/chuncked_set"
+#define RESULTS_PATH "//home/geeth99/Desktop/chuncked_set/results"
 #define MAX_CHUNKS 1024
 #define MAX_FILENAME_LEN 256
 #define EMPLOYEE_PORT 12345
