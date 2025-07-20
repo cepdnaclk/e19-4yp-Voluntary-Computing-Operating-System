@@ -274,6 +274,7 @@ static int send_result_to_employer(int sockfd, const result_info_t* result) {
 
 // Handle incoming connections and task requests
 static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_s *manager) {
+    
     printf("[Employee] Now in persistent communication mode with employer.\n");
 
     is_node_started = false;

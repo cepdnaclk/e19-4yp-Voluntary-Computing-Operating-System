@@ -274,17 +274,18 @@ int handle_task_timeouts(void) {
 // Send the initial configuration script to a new employee
 static int send_initial_config(employee_node_t* employee) {
     // Assuming the script is named "script"
-    const char *filename = "/script.py";
+    const char *filename = "/unix_socket.js";
     char config_filepath[512];  // Make sure the buffer is large enough
 
     snprintf(config_filepath, sizeof(config_filepath), "%s%s", CHUNKED_SET_PATH, filename);
     printf("[Employer] Sending initial config '%s' to %s\n", config_filepath, employee->ip_address);
 
     // 1. Send metadata
+    // TODO: get file type not hardcoded
     cJSON *metadata = cJSON_CreateObject();
     cJSON_AddStringToObject(metadata, "message_type", "initial_config");
     cJSON_AddStringToObject(metadata, "task_id", "init_script");
-    cJSON_AddStringToObject(metadata, "chunk_filename", "script.py");
+    cJSON_AddStringToObject(metadata, "chunk_filename", "script.js");
     cJSON_AddStringToObject(metadata, "sender_id", "employer");
     if (send_json(employee->sockfd, metadata) != PROTOCOL_OK) {
         printf("[Employer] Failed to send initial_config metadata to %s\n", employee->ip_address);
