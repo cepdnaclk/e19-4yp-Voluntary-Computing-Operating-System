@@ -152,23 +152,28 @@ const server = net.createServer((socket) => {
         const imageBuffer = Buffer.from(jsonData.image_data, 'base64');
         console.log(`[NODE] Decoded image buffer size: ${imageBuffer.length} bytes`);
         detectionResult = await detectFromBuffer(imageBuffer);
+        
+        // Create annotated image
+        const annotatedImageBase64 = await createAnnotatedImage(imageBuffer, detectionResult);
+        
+        const response = {
+          status: 'success',
+          objects: detectionResult.length,
+          predictions: detectionResult,
+          annotated_image: annotatedImageBase64,
+          timestamp: new Date().toISOString(),
+          original_timestamp: jsonData.timestamp
+        };
+        console.log('[NODE] Detection and annotation completed');
+        
+        // Send response back to client if socket is still open
+        if (!clientSocket.destroyed && clientSocket.writable) {
+          clientSocket.write(JSON.stringify(response));
+          clientSocket.end(); // End the connection after sending response
+        }
+        return;
       } else {
         throw new Error('Invalid JSON format. Expected type: "image_detection" with image_data field');
-      }
-      
-      const response = {
-        status: 'success',
-        objects: detectionResult.length,
-        predictions: detectionResult,
-        timestamp: new Date().toISOString(),
-        original_timestamp: jsonData.timestamp
-      };
-      console.log('[NODE] Detection completed:', response);
-      
-      // Send response back to client if socket is still open
-      if (!clientSocket.destroyed && clientSocket.writable) {
-        clientSocket.write(JSON.stringify(response));
-        clientSocket.end(); // End the connection after sending response
       }
     } catch (err) {
       console.error('[NODE] JSON Detection failed:', err);
@@ -306,4 +311,73 @@ async function detectFromBuffer(imageBuffer) {
     throw error;
   }
 }
+
+// Function to create annotated image with bounding boxes
+async function createAnnotatedImage(imageBuffer, predictions) {
+  try {
+    console.log('[NODE] Creating annotated image...');
+    
+    if (!createCanvas || !loadImage) {
+      throw new Error('Canvas module not available for image annotation');
+    }
+    
+    // Save the image buffer to a temporary file
+    const tempInputPath = `/tmp/temp_input_${Date.now()}.jpg`;
+    fs.writeFileSync(tempInputPath, imageBuffer);
+    
+    // Load the image using canvas
+    const image = await loadImage(tempInputPath);
+    const canvas = createCanvas(image.width, image.height);
+    const ctx = canvas.getContext('2d');
+    
+    // Draw the original image
+    ctx.drawImage(image, 0, 0);
+    
+    // Set up drawing style for bounding boxes
+    ctx.strokeStyle = '#00FF00'; // Green color
+    ctx.lineWidth = 3;
+    ctx.fillStyle = '#00FF00';
+    ctx.font = '16px Arial';
+    
+    // Draw bounding boxes and labels
+    predictions.forEach((pred, index) => {
+      const [x, y, width, height] = pred.bbox;
+      
+      // Draw bounding box
+      ctx.strokeRect(x, y, width, height);
+      
+      // Draw label background
+      const label = `${pred.class} ${(pred.score * 100).toFixed(0)}%`;
+      const textMetrics = ctx.measureText(label);
+      const textHeight = 20;
+      
+      ctx.fillStyle = '#00FF00';
+      ctx.fillRect(x, y - textHeight, textMetrics.width + 10, textHeight);
+      
+      // Draw label text
+      ctx.fillStyle = '#000000'; // Black text
+      ctx.fillText(label, x + 5, y - 5);
+      
+      console.log(`[NODE] Annotated ${pred.class} at [${x}, ${y}, ${width}, ${height}]`);
+    });
+    
+    // Convert canvas to buffer
+    const annotatedBuffer = canvas.toBuffer('image/jpeg', { quality: 0.9 });
+    
+    // Convert to base64
+    const annotatedBase64 = annotatedBuffer.toString('base64');
+    
+    // Clean up temp file
+    fs.unlinkSync(tempInputPath);
+    
+    console.log(`[NODE] Annotation complete. Annotated image size: ${annotatedBuffer.length} bytes`);
+    return annotatedBase64;
+    
+  } catch (error) {
+    console.error('[NODE] Error creating annotated image:', error);
+    // Return empty string if annotation fails
+    return '';
+  }
+}
+
 // <--------- END EDIT --------->

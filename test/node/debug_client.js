@@ -31,26 +31,51 @@ const client = net.createConnection(SOCKET_PATH, () => {
 });
 
 client.on('data', (data) => {
-  console.log('Received response length:', data.length);
-  console.log('Received response:', data.toString());
+  // Buffer the response data in case it comes in multiple chunks
+  if (!client.responseBuffer) {
+    client.responseBuffer = Buffer.alloc(0);
+  }
   
-  // Parse and display the response nicely
+  client.responseBuffer = Buffer.concat([client.responseBuffer, data]);
+  console.log(`Received ${data.length} bytes, total buffered: ${client.responseBuffer.length} bytes`);
+  
+  // Try to parse the complete JSON response
   try {
-    const response = JSON.parse(data.toString());
-    console.log('Parsed response:');
+    const responseString = client.responseBuffer.toString();
+    const response = JSON.parse(responseString);
+    
+    console.log('Successfully parsed complete JSON response');
     console.log('Status:', response.status);
     if (response.status === 'success') {
       console.log('Objects detected:', response.objects);
       console.log('Predictions:', JSON.stringify(response.predictions, null, 2));
+      
+      // Handle annotated image if present
+      if (response.annotated_image) {
+        const annotatedBuffer = Buffer.from(response.annotated_image, 'base64');
+        const outputPath = 'detected_frames/annotated_' + imagePath.split('/').pop();
+        
+        // Create directory if it doesn't exist
+        if (!fs.existsSync('detected_frames')) {
+          fs.mkdirSync('detected_frames');
+        }
+        
+        fs.writeFileSync(outputPath, annotatedBuffer);
+        console.log(`Annotated image saved to: ${outputPath}`);
+        console.log(`Annotated image size: ${annotatedBuffer.length} bytes`);
+      } else {
+        console.log('No annotated image received');
+      }
     } else {
       console.log('Error message:', response.message);
     }
+    
+    // Close the client after successful parsing
+    client.destroy();
   } catch (parseError) {
-    console.log('Could not parse response as JSON');
+    // JSON is not complete yet, wait for more data
+    console.log('JSON not complete yet, waiting for more data...');
   }
-  
-  // Close the client after receiving the response
-  client.destroy();
 });
 
 client.on('end', () => {
