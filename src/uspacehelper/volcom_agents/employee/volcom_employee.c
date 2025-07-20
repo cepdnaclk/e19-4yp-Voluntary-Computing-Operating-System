@@ -300,89 +300,109 @@ static int send_result_to_employer(int sockfd, const result_info_t* result) {
     return 0;
 }
 
+
+// Helper structs for threads
+typedef struct {
+    char filepath[512];
+    void *data;
+    size_t data_size;
+} file_save_args_t;
+
+typedef struct {
+    struct volcom_rcsmngr_s *manager;
+    char task_id[128];
+    char config_filepath[512];
+} node_start_args_t;
+
+// Thread function to save a file
+void* save_file_thread(void* arg) {
+    file_save_args_t *args = (file_save_args_t*)arg;
+    FILE* f = fopen(args->filepath, "wb");
+    if (f) {
+        fwrite(args->data, 1, args->data_size, f);
+        fclose(f);
+        printf("[Employee] File saved to %s\n", args->filepath);
+    } else {
+        perror("[Employee] Failed to save file");
+    }
+    free(args->data);
+    free(args);
+    return NULL;
+}
+
+// Thread function to start node
+void* start_node_thread(void* arg) {
+    node_start_args_t *args = (node_start_args_t*)arg;
+    if (run_node_in_cgroup(args->manager, args->task_id, args->config_filepath) == 0) {
+        printf("[Employee] Node started successfully.\n");
+        is_node_started = true;
+    } else {
+        fprintf(stderr, "[Employee] ERROR: Failed to start the node.\n");
+    }
+    free(args);
+    return NULL;
+}
+
 // Handle incoming connections and task requests
 static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_s *manager) {
-    
     printf("[Employee] Now in persistent communication mode with employer.\n");
-
     is_node_started = false;
-
     while (employee_running) {
         fd_set readfds;
         struct timeval timeout;
-        
         FD_ZERO(&readfds);
         FD_SET(employer_fd, &readfds);
-        
-        // We also need to check for results to send, so a short timeout is fine.
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
-        
         int activity = select(employer_fd + 1, &readfds, NULL, NULL, &timeout);
-        
         if (activity < 0 && errno != EINTR) {
             perror("[Employee] Select error");
             break;
         }
-        
         // 1. Check for incoming data from the employer
         if (activity > 0 && FD_ISSET(employer_fd, &readfds)) {
             cJSON* initial_check = NULL;
-            //memset(&task, 0, sizeof(task));
-
             if(recv_json_peek(employer_fd, &initial_check) != PROTOCOL_OK) {
                 printf("[Employee] Connection closed by employer.\n");
                 break;
             }
-
             const cJSON* msg_type_item = cJSON_GetObjectItem(initial_check, "message_type");
-
             if (!msg_type_item || !cJSON_IsString(msg_type_item)) {
                 printf("[Employee] Invalid message format: missing 'message_type'.\n");
                 cJSON_Delete(initial_check);
-                break; 
+                break;
             }
-
             char* msg_type = msg_type_item->valuestring;
-
             if (strcmp(msg_type, "initial_config") == 0) {
                 printf("[Employee] Receiving initial configuration...\n");
-
                 received_task_t config_task;
                 memset(&config_task, 0, sizeof(config_task));
-
                 if (receive_task_from_employer(employer_fd, &config_task) == 0) {
-                    // Save the config file and start the node
                     char config_filepath[512];
                     snprintf(config_filepath, sizeof(config_filepath), "/tmp/config_%s.js", config_task.task_id);
-                    FILE* f = fopen(config_filepath, "wb");
-
-                    if(f) {
-                        fwrite(config_task.data, 1, config_task.data_size, f);
-                        fclose(f);
-                        printf("[Employee] Configuration saved to %s\n", config_filepath);
-
-                        // Call the external start_node function
-                        // TODO: 
-                        if (run_node_in_cgroup(manager, config_task.task_id, config_filepath) == 0) {
-                            printf("[Employee] Node started successfully.\n");
-                            is_node_started = true;
-                        } else {
-                            fprintf(stderr, "[Employee] ERROR: Failed to start the node.\n");
-                        }
-                    } else {
-                        perror("[Employee] Failed to save config file");
-                    }
-
-                    if(config_task.data) free(config_task.data);
+                    // Save config in a thread
+                    file_save_args_t *save_args = malloc(sizeof(file_save_args_t));
+                    strcpy(save_args->filepath, config_filepath);
+                    save_args->data = config_task.data;
+                    save_args->data_size = config_task.data_size;
+                    pthread_t save_thread;
+                    pthread_create(&save_thread, NULL, save_file_thread, save_args);
+                    pthread_detach(save_thread);
+                    // Start node in a thread
+                    node_start_args_t *node_args = malloc(sizeof(node_start_args_t));
+                    node_args->manager = manager;
+                    strcpy(node_args->task_id, config_task.task_id);
+                    strcpy(node_args->config_filepath, config_filepath);
+                    pthread_t node_thread;
+                    pthread_create(&node_thread, NULL, start_node_thread, node_args);
+                    pthread_detach(node_thread);
+                    // Do not free config_task.data here, handled by thread
                 } else {
                     fprintf(stderr, "[Employee] Failed to receive initial configuration.\n");
                 }
             } else if (strcmp(msg_type, "data_chunk") == 0) {
                 if (!is_node_started) {
-                    // TODO: Why ??? cann't we use buffer
                     printf("[Employee] Warning: Received data chunk before node was configured. Ignoring.\n");
-                    // Discard the message fully
                     received_task_t temp_task;
                     receive_task_from_employer(employer_fd, &temp_task);
                     if(temp_task.data) free(temp_task.data);
@@ -390,28 +410,30 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
                     received_task_t task;
                     memset(&task, 0, sizeof(task));
                     if (receive_task_from_employer(employer_fd, &task) == 0) {
-                        if (add_task_to_buffer(&task_buffer, &task) == 0) {
-                            printf("[Employee] Data chunk %s successfully received and queued\n", task.task_id);
-                        } else {
-                            printf("[Employee] Task buffer full, rejecting chunk %s\n", task.task_id);
-                            if (task.data) free(task.data);
-                        }
+                        char chunk_filepath[512];
+                        snprintf(chunk_filepath, sizeof(chunk_filepath), "/tmp/chunk_%s.bin", task.task_id);
+                        file_save_args_t *save_args = malloc(sizeof(file_save_args_t));
+                        strcpy(save_args->filepath, chunk_filepath);
+                        save_args->data = task.data;
+                        save_args->data_size = task.data_size;
+                        pthread_t save_thread;
+                        pthread_create(&save_thread, NULL, save_file_thread, save_args);
+                        pthread_detach(save_thread);
+                        printf("[Employee] Data chunk %s successfully received and saved\n", task.task_id);
+                        // Do not free task.data here, handled by thread
                     } else {
                         printf("[Employee] Failed to receive data chunk or connection closed.\n");
-                        break; // Assume connection is lost
+                        break;
                     }
                 }
             } else {
                 printf("[Employee] Unknown message type received: %s\n", msg_type);
-                // Discard message
                 cJSON* temp_json = NULL;
                 recv_json(employer_fd, &temp_json);
                 cJSON_Delete(temp_json);
             }
-
             cJSON_Delete(initial_check);
         }
-
         // 2. Check for and send any completed task results
         if (!is_result_queue_empty(&result_queue)) {
             result_info_t result_to_send;
@@ -422,13 +444,12 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
                     employee_status.tasks_completed++;
                 } else {
                     printf("[Employee] Failed to send result for task %s. Re-queueing.\n", result_to_send.task_id);
-                    add_result_to_queue(&result_queue, &result_to_send); // Re-add to queue for retry
+                    add_result_to_queue(&result_queue, &result_to_send);
                     employee_status.tasks_failed++;
                 }
             }
         }
     }
-
     printf("[Employee] Connection with employer lost. Returning to listening mode.\n");
     close(employer_fd);
 }
