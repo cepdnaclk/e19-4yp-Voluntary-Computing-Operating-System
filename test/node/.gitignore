@@ -1,0 +1,6 @@
+# outputs
+frames/
+detected_frames/
+
+# Vidoes
+*.mp4
