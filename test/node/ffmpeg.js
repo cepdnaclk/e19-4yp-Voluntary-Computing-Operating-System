@@ -2,7 +2,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 
-async function extractFrames(videoPath, outputFolder, fps = 1) {
+async function extractFrames(videoPath, outputFolder, extractAll = true, fps = null) {
   // Check if video file exists
   if (!fs.existsSync(videoPath)) {
     throw new Error(`Video file not found: ${videoPath}`);
@@ -14,15 +14,31 @@ async function extractFrames(videoPath, outputFolder, fps = 1) {
   }
 
   return new Promise((resolve, reject) => {
-    console.log(`Extracting frames from ${videoPath} at ${fps} fps...`);
+    let ffmpegArgs;
     
-    const ffmpeg = spawn('ffmpeg', [
-      '-i', videoPath,
-      '-vf', `fps=${fps}`,
-      '-y', // Overwrite output files
-      '-q:v', '2', // High quality
-      path.join(outputFolder, 'frame_%05d.jpg')
-    ]);
+    if (extractAll) {
+      console.log(`Extracting ALL frames from ${videoPath} at original frame rate...`);
+      // Extract all frames without frame rate filtering
+      ffmpegArgs = [
+        '-i', videoPath,
+        '-y', // Overwrite output files
+        '-q:v', '2', // High quality
+        path.join(outputFolder, 'frame_%05d.jpg')
+      ];
+    } else {
+      const targetFps = fps || 1;
+      console.log(`Extracting frames from ${videoPath} at ${targetFps} fps...`);
+      // Extract at specified frame rate
+      ffmpegArgs = [
+        '-i', videoPath,
+        '-vf', `fps=${targetFps}`,
+        '-y', // Overwrite output files
+        '-q:v', '2', // High quality
+        path.join(outputFolder, 'frame_%05d.jpg')
+      ];
+    }
+    
+    const ffmpeg = spawn('ffmpeg', ffmpegArgs);
 
     let stderr = '';
 
@@ -57,16 +73,26 @@ async function extractFrames(videoPath, outputFolder, fps = 1) {
 // Usage with better error handling
 const videoPath = process.argv[2] || 'input.mp4';
 const outputFolder = process.argv[3] || 'frames';
-const fps = parseFloat(process.argv[4]) || 1;
+const mode = process.argv[4] || 'all'; // 'all' or 'fps'
+const fps = parseFloat(process.argv[5]) || 1;
 
 // Show usage if no video file provided
 if (!process.argv[2]) {
-  console.log('Usage: node ffmpeg.js <video_file> [output_folder] [fps]');
-  console.log('Example: node ffmpeg.js video.mp4 frames 1');
+  console.log('Usage: node ffmpeg.js <video_file> [output_folder] [mode] [fps]');
+  console.log('Modes:');
+  console.log('  all  - Extract ALL frames at original frame rate (default)');
+  console.log('  fps  - Extract frames at specified fps rate');
+  console.log('');
+  console.log('Examples:');
+  console.log('  node ffmpeg.js video.mp4                    # Extract all frames');
+  console.log('  node ffmpeg.js video.mp4 frames all         # Extract all frames to "frames" folder');
+  console.log('  node ffmpeg.js video.mp4 frames fps 1       # Extract 1 frame per second');
+  console.log('  node ffmpeg.js video.mp4 frames fps 0.5     # Extract 1 frame every 2 seconds');
   process.exit(1);
 }
 
-extractFrames(videoPath, outputFolder, fps).catch((error) => {
+const extractAll = mode === 'all';
+extractFrames(videoPath, outputFolder, extractAll, fps).catch((error) => {
   console.error('Error:', error.message);
   process.exit(1);
 });
