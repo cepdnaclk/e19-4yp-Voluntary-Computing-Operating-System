@@ -39,6 +39,13 @@ static result_queue_t result_queue; // Global result queue
 static agent_status_t employee_status;
 static bool is_node_started = false;
 
+// TODO: Move to a config file
+struct unix_socket_config_s client_socket_config = {
+    .socket_path = "/tmp/volcom_unix_socket",
+    .buffer_size = 1024,
+    .timeout_sec = 5
+};
+
 // Forward declaration for the function to be imported
 // extern int start_node(const char* config_path);
 
@@ -136,15 +143,36 @@ static void* worker_loop(void* arg) {
             printf("[Employee] Task %s: Processing file %s...\n", task.task_id, task.chunk_filename);
             
             // Simulate processing time based on file size
-            int processing_time = (task.data_size / 1024) + 2; // 2 seconds + 1 sec per KB
-            if (processing_time > 30) processing_time = 30; // Max 30 seconds
+            // int processing_time = (task.data_size / 1024) + 2; // 2 seconds + 1 sec per KB
+            // if (processing_time > 30) processing_time = 30; // Max 30 seconds
             
-            for (int i = 0; i < processing_time && employee_running; i++) {
-                printf("[Employee] Task %s: Processing... %d/%d seconds\n", 
-                       task.task_id, i + 1, processing_time);
-                sleep(1);
+            // for (int i = 0; i < processing_time && employee_running; i++) {
+            //     printf("[Employee] Task %s: Processing... %d/%d seconds\n", 
+            //            task.task_id, i + 1, processing_time);
+            //     sleep(1);
+            // }
+            //TODO: Check
+            char success_message[] = "{"
+                "\"status\": \"success\","
+                "\"message\": \"Data saved successfully from C client\","
+                "\"timestamp\": \"2025-07-18T12:00:00Z\","
+                "\"file\": \"img_1721304000.bin\","
+                "\"size\": 1024"
+            "}";
+            
+            if (unix_socket_client_send_message(success_message)) {
+                printf("Success message sent!\n");
+                
+                // Receive response
+                char response[1024];
+                ssize_t bytes = unix_socket_client_receive_message(response, sizeof(response));
+                if (bytes > 0) {
+                    printf("JavaScript server response: %s\n", response);
+                }
+            } else {
+                printf("Failed to send success message\n");
             }
-            
+    
             if (!employee_running) {
                 printf("[Employee] Task %s interrupted due to shutdown\n", task.task_id);
                 break;
@@ -161,7 +189,7 @@ static void* worker_loop(void* arg) {
             if (result_file) {
                 fprintf(result_file, "Task ID: %s\n", task.task_id);
                 fprintf(result_file, "Original file: %s\n", task.chunk_filename);
-                fprintf(result_file, "Processing time: %d seconds\n", processing_time);
+                // fprintf(result_file, "Processing time: %d seconds\n", processing_time);
                 fprintf(result_file, "File size: %zu bytes\n", task.data_size);
                 fprintf(result_file, "Processed by: %s\n", employee_status.agent_id);
                 fprintf(result_file, "Completed at: %ld\n", time(NULL));
@@ -509,6 +537,7 @@ static int receive_task_from_employer(int sockfd, received_task_t* task) {
 
 // Employee mode main function
 int run_employee_mode(struct volcom_rcsmngr_s *manager) {
+
     printf("[Employee] Starting Employee Mode...\n");
 
     if (init_agent(AGENT_MODE_EMPLOYEE) != 0) {
@@ -711,6 +740,19 @@ int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, 
             printf("Failed to add process %d to cgroup\n", pid);
         }
 
+        printf("[Employee] Connecting to unix socket server to send task result...\n");
+        if( !unix_socket_client_init(&client_socket_config)) {
+            fprintf(stderr, "[ERROR][Employee] Failed to initialize Unix socket client\n");
+            return -1;
+        }
+
+        while(!unix_socket_client_connect()) {
+            printf("[Employee] Waiting for connection to Unix socket server...\n");
+            usleep(100000); // 100ms
+        }
+
+        printf("[Employee] Connected to Unix socket server\n");
+
         // Wait for the child process to complete
         int status;
         printf("Waiting for Node.js task to complete...\n");
@@ -724,6 +766,10 @@ int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, 
             printf("Task '%s' terminated by signal %d\n", task_name, WTERMSIG(status));
             return -1;
         }
+
+        unix_socket_client_cleanup();
+        printf("[Employee] Unix socket client cleaned up\n");
+        printf("[Employee] Task '%s' completed successfully\n", task_name);
         
         return 0;
     }
