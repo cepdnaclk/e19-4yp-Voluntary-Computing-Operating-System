@@ -740,8 +740,78 @@ int run_node_in_cgroup(struct volcom_rcsmngr_s *manager, const char *task_name, 
     if (pid == 0) {
         // Child process - execute Node.js script with data point as argument
         printf("Child process %d starting Node.js task: %s \n", getpid(), task_name);
+        
+        // Get current working directory before changing it (for relative script paths)
+        char *original_cwd = getcwd(NULL, 0);
+        
+        // Convert relative path to absolute path if needed
+        char absolute_script_path[1024];
+        if (script_path[0] != '/') {
+            // Relative path - convert to absolute using original working directory
+            if (original_cwd) {
+                snprintf(absolute_script_path, sizeof(absolute_script_path), "%s/%s", original_cwd, script_path);
+                printf("Converted relative script path to absolute: %s\n", absolute_script_path);
+                script_path = absolute_script_path;
+            }
+        }
+        
+        // Set multiple environment variables for Node.js module resolution
+        // Use the original user's home directory, not root's when running with sudo
+        const char* home_dir = getenv("SUDO_USER") ? "/home/" : getenv("HOME");
+        char node_modules_path[512];
+        
+        if (getenv("SUDO_USER")) {
+            // Running with sudo, use the actual user's home directory
+            snprintf(node_modules_path, sizeof(node_modules_path), "/home/%s/node_global_modules/node_modules", getenv("SUDO_USER"));
+        } else if (home_dir) {
+            snprintf(node_modules_path, sizeof(node_modules_path), "%s/node_global_modules/node_modules", home_dir);
+        } else {
+            strcpy(node_modules_path, "/home/dasun/node_global_modules/node_modules");
+        }
+        
+        printf("Setting Node.js environment:\n");
+        printf("  NODE_PATH: %s\n", node_modules_path);
+        
+        // Set NODE_PATH
+        setenv("NODE_PATH", node_modules_path, 1);
+        
+        // Also try setting NODE_MODULES_PATH (some applications use this)
+        setenv("NODE_MODULES_PATH", node_modules_path, 1);
+        
+        // Add to existing PATH for node_modules/.bin
+        const char* current_path = getenv("PATH");
+        if (current_path && strlen(current_path) < 500) { // Safety check
+            char extended_path[1024];
+            snprintf(extended_path, sizeof(extended_path), "%s:%s/.bin", 
+                     current_path, node_modules_path);
+            setenv("PATH", extended_path, 1);
+            printf("  Extended PATH with: %s/.bin\n", node_modules_path);
+        }
+        
+        // Set working directory to a location where require() can work
+        char work_dir[512];
+        if (getenv("SUDO_USER")) {
+            // Running with sudo, use the actual user's home directory
+            snprintf(work_dir, sizeof(work_dir), "/home/%s/node_global_modules", getenv("SUDO_USER"));
+        } else if (home_dir) {
+            snprintf(work_dir, sizeof(work_dir), "%s/node_global_modules", home_dir);
+        } else {
+            strcpy(work_dir, "/home/dasun/node_global_modules");
+        }
+        
+        printf("  Changing working directory to: %s\n", work_dir);
+        if (chdir(work_dir) != 0) {
+            printf("  Warning: Failed to change working directory, continuing...\n");
+        }
+        
+        // Print final environment for debugging
+        printf("  Final NODE_PATH: %s\n", getenv("NODE_PATH"));
+        printf("  Script to execute: %s\n", script_path);
+        
         execlp("node", "node", script_path);
         perror("execlp failed - Node.js not found or script error");
+        
+        if (original_cwd) free(original_cwd);
         exit(1);
     } else {
         // Parent process - add child to cgroup
