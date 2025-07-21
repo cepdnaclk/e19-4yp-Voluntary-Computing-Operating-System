@@ -68,12 +68,13 @@ async function extractFramesToJSON(videoPath, outputFolder) {
             
             // Create JSON object
             const frameData = {
+              type: "image_detection",
               frameNumber: i + 1,
               originalFileName: frameFile,
               timestamp: new Date().toISOString(),
               format: 'jpg',
               size: imageBuffer.length,
-              imageData: imageBase64
+              image_data: imageBase64
             };
             
             // Save as JSON file
