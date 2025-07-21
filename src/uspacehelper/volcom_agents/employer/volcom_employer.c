@@ -274,7 +274,7 @@ int handle_task_timeouts(void) {
 // Send the initial configuration script to a new employee
 static int send_initial_config(employee_node_t* employee) {
     // Assuming the script is named "script"
-    const char *filename = "/unix_socket.js";
+    const char *filename = "/object-detection.js";
     char config_filepath[512];  // Make sure the buffer is large enough
 
     snprintf(config_filepath, sizeof(config_filepath), "%s%s", CHUNKED_SET_PATH, filename);
@@ -559,7 +559,7 @@ void populate_chunked_tasks() {
     }
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        if (strstr(entry->d_name, ".png")) {
+        if (strstr(entry->d_name, ".json")) {
             char filepath[512];
             snprintf(filepath, sizeof(filepath), "%s/%s", CHUNKED_SET_PATH, entry->d_name);
 
