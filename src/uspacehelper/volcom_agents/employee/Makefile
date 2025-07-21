@@ -1,7 +1,7 @@
 # Makefile for volcom_employee module
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -pthread -fPIC -D_GNU_SOURCE
+CFLAGS = -Wall -Wextra -std=c99 -pthread -fPIC -D_GNU_SOURCE -I..
 LDFLAGS = -pthread
 
 # Source files

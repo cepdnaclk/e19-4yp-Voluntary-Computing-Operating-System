@@ -20,6 +20,8 @@
 #include <netdb.h>
 #include <sys/un.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/select.h>
 
 #define MAX_JSON_SIZE 65536
 #define MAX_FILENAME_LEN 256

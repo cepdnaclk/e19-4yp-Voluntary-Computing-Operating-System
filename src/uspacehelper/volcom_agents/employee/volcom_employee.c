@@ -46,8 +46,8 @@ static task_buffer_t data_chunk_buffer; // Buffer for incoming data chunks
 // TODO: Move to a config file
 struct unix_socket_config_s client_socket_config = {
     .socket_path = "/tmp/volcom_unix_socket",
-    .buffer_size = 1024,
-    .timeout_sec = 5
+    .buffer_size = 2 * 1024 * 1024, // Increased to 2MB for large JSON responses
+    .timeout_sec = 30 // Increased timeout for large data processing
 };
 
 // ============================================================================
@@ -123,6 +123,100 @@ static void* broadcast_loop(void* arg) {
 }
 
 // ============================================================================
+// HELPER FUNCTIONS FOR JSON HANDLING
+// ============================================================================
+
+// Function to receive complete JSON response from Unix socket
+static ssize_t receive_complete_json_response(char *buffer, size_t buffer_size) {
+    if (!buffer || buffer_size == 0) {
+        return -1;
+    }
+    
+    memset(buffer, 0, buffer_size);
+    ssize_t total_bytes = 0;
+    int brace_count = 0;
+    bool in_string = false;
+    bool escape_next = false;
+    bool json_started = false;
+    
+    // Read response in chunks until we have a complete JSON object
+    while (total_bytes < (ssize_t)buffer_size - 1) {
+        char temp_buffer[1024];
+        ssize_t chunk_bytes = unix_socket_client_receive_message(temp_buffer, sizeof(temp_buffer) - 1);
+        
+        if (chunk_bytes <= 0) {
+            if (total_bytes > 0) {
+                // We have some data, might be complete
+                break;
+            }
+            return chunk_bytes; // Error or no data
+        }
+        
+        // Ensure null termination of chunk
+        temp_buffer[chunk_bytes] = '\0';
+        
+        // Check if we can fit this chunk
+        if (total_bytes + chunk_bytes >= (ssize_t)buffer_size) {
+            // Truncate to fit
+            chunk_bytes = buffer_size - total_bytes - 1;
+        }
+        
+        // Copy chunk to main buffer
+        memcpy(buffer + total_bytes, temp_buffer, chunk_bytes);
+        total_bytes += chunk_bytes;
+        
+        // Parse through the new chunk to check for complete JSON
+        for (ssize_t i = total_bytes - chunk_bytes; i < total_bytes; i++) {
+            char c = buffer[i];
+            
+            if (escape_next) {
+                escape_next = false;
+                continue;
+            }
+            
+            if (in_string) {
+                if (c == '\\') {
+                    escape_next = true;
+                } else if (c == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+            
+            // Not in string
+            switch (c) {
+                case '"':
+                    in_string = true;
+                    break;
+                case '{':
+                    if (!json_started) json_started = true;
+                    brace_count++;
+                    break;
+                case '}':
+                    brace_count--;
+                    if (json_started && brace_count == 0) {
+                        // Complete JSON object received
+                        buffer[total_bytes] = '\0';
+                        return total_bytes;
+                    }
+                    break;
+            }
+        }
+        
+        // If we haven't started seeing JSON yet, keep reading
+        if (!json_started) {
+            continue;
+        }
+        
+        // Small delay to avoid busy waiting
+        usleep(10000); // 10ms
+    }
+    
+    buffer[total_bytes] = '\0';
+    return total_bytes;
+}
+
+// ============================================================================
 // CORE WORKER THREAD - PROCESSES DATA CHUNKS VIA UNIX SOCKET
 // ============================================================================
 
@@ -143,44 +237,147 @@ static void* worker_loop(void* arg) {
                 if (unix_socket_client_send_message((char*)data_chunk.data)) {
                     printf("[Employee] Data chunk file content sent to node script\n");
                     
-                    // Wait for response from node script
-                    char response[4096];
-                    ssize_t bytes = unix_socket_client_receive_message(response, sizeof(response));
+                    // Wait for response from node script - use larger buffer for responses with images
+                    char *response = malloc(2 * 1024 * 1024); // Increased to 2MB for larger responses
+                    if (!response) {
+                        printf("[Employee] Failed to allocate memory for response buffer\n");
+                        continue;
+                    }
+                    
+                    // Initialize buffer to ensure clean state
+                    memset(response, 0, 2 * 1024 * 1024);
+                    
+                    // Try to receive complete JSON response
+                    ssize_t bytes = receive_complete_json_response(response, 2 * 1024 * 1024 - 1);
+                    
+                    // Fallback to regular receive if the custom function fails
+                    if (bytes <= 0) {
+                        printf("[Employee] Complete JSON receive failed, trying regular receive...\n");
+                        bytes = unix_socket_client_receive_message(response, 2 * 1024 * 1024 - 1);
+                    }
                     if (bytes > 0) {
-                        printf("[Employee] Node script response: %s\n", response);
+                        printf("[Employee] Node script response received (%zd bytes)\n", bytes);
+                        
+                        // Ensure null termination with safety check
+                        if (bytes < 2 * 1024 * 1024 - 1) {
+                            response[bytes] = '\0';
+                        } else {
+                            response[2 * 1024 * 1024 - 1] = '\0';
+                        }
+                        
+                        // Debug: Print first few characters of response
+                        printf("[Employee] Response preview (first 200 chars): %.200s\n", response);
+                        
+                        // Check if response looks like valid JSON (starts with { or [)
+                        char *trimmed_response = response;
+                        while (*trimmed_response && (*trimmed_response == ' ' || *trimmed_response == '\t' || *trimmed_response == '\n' || *trimmed_response == '\r')) {
+                            trimmed_response++;
+                        }
+                        
+                        if (*trimmed_response != '{' && *trimmed_response != '[') {
+                            printf("[Employee] Warning: Response doesn't appear to start with JSON: first char is '%c' (0x%02x)\n", 
+                                   *trimmed_response, (unsigned char)*trimmed_response);
+                        }
                         
                         // Parse response and add to result queue
-                        cJSON *response_json = cJSON_Parse(response);
+                        cJSON *response_json = cJSON_Parse(trimmed_response);
                         if (response_json) {
+                            printf("[Employee] JSON parsed successfully\n");
                             const cJSON *status = cJSON_GetObjectItem(response_json, "status");
+                            const cJSON *objects = cJSON_GetObjectItem(response_json, "objects");
+                            const cJSON *annotated_image = cJSON_GetObjectItem(response_json, "annotated_image");
                             
                             if (status && cJSON_IsString(status)) {
+                                printf("[Employee] Detection status: %s\n", status->valuestring);
+                                
+                                if (objects && cJSON_IsNumber(objects)) {
+                                    printf("[Employee] Objects detected: %d\n", (int)objects->valuedouble);
+                                }
+                                
+                                if (annotated_image && cJSON_IsString(annotated_image)) {
+                                    printf("[Employee] Annotated image data included (length: %zu)\n", 
+                                           strlen(annotated_image->valuestring));
+                                }
+                                
                                 // Create result info
                                 result_info_t result_info;
+                                memset(&result_info, 0, sizeof(result_info));
                                 strncpy(result_info.task_id, data_chunk.task_id, sizeof(result_info.task_id) - 1);
                                 strncpy(result_info.employer_ip, data_chunk.sender_id, sizeof(result_info.employer_ip) - 1);
                                 
-                                // Create result file
+                                // Create result file with the complete JSON response
                                 char result_filename[512];
                                 snprintf(result_filename, sizeof(result_filename), "/tmp/node_result_%s.json", data_chunk.task_id);
                                 
                                 FILE *result_file = fopen(result_filename, "w");
                                 if (result_file) {
-                                    fprintf(result_file, "%s", response);
+                                    // Write the complete JSON response to file
+                                    fprintf(result_file, "%s", trimmed_response);
                                     fclose(result_file);
                                     
                                     strncpy(result_info.result_filepath, result_filename, sizeof(result_info.result_filepath) - 1);
                                     
+                                    printf("[Employee] Complete detection result saved to: %s\n", result_filename);
+                                    
                                     // Add to result queue for sending back to employer
                                     if (add_result_to_queue(&result_queue, &result_info) == 0) {
-                                        printf("[Employee] Node script result for task %s queued for sending to employer\n", data_chunk.task_id);
+                                        printf("[Employee] Detection result for task %s queued for transmission to employer\n", data_chunk.task_id);
+                                        printf("[Employee] Result includes: %s status, %d detected objects%s\n", 
+                                               status->valuestring,
+                                               objects ? (int)objects->valuedouble : 0,
+                                               annotated_image ? ", annotated image" : "");
                                     } else {
-                                        printf("[Employee] Failed to queue node script result for task %s\n", data_chunk.task_id);
+                                        printf("[Employee] Failed to queue detection result for task %s\n", data_chunk.task_id);
+                                    }
+                                } else {
+                                    printf("[Employee] Failed to create result file: %s\n", result_filename);
+                                    perror("fopen result file");
+                                }
+                            } else {
+                                printf("[Employee] Invalid response format - missing or invalid status field\n");
+                                printf("[Employee] Available JSON fields:\n");
+                                const cJSON *item = NULL;
+                                cJSON_ArrayForEach(item, response_json) {
+                                    if (item->string) {
+                                        printf("  - %s: %s\n", item->string, 
+                                               cJSON_IsString(item) ? item->valuestring : 
+                                               cJSON_IsNumber(item) ? "number" : "other");
                                     }
                                 }
                             }
                             cJSON_Delete(response_json);
+                        } else {
+                            printf("[Employee] Failed to parse JSON response from Node.js script\n");
+                            printf("[Employee] Response size: %zd bytes\n", bytes);
+                            printf("[Employee] Raw response preview: %.500s...\n", response);
+                            
+                            // Check for common JSON parsing issues
+                            if (strlen(trimmed_response) == 0) {
+                                printf("[Employee] Error: Empty response received\n");
+                            } else if (trimmed_response[strlen(trimmed_response) - 1] != '}' && 
+                                      trimmed_response[strlen(trimmed_response) - 1] != ']') {
+                                printf("[Employee] Error: Response appears to be truncated (doesn't end with } or ])\n");
+                            }
+                            
+                            // Try to find JSON error position
+                            const char *error_ptr = cJSON_GetErrorPtr();
+                            if (error_ptr != NULL) {
+                                printf("[Employee] JSON parse error near: %.50s\n", error_ptr);
+                            }
+                            
+                            // Save the raw response for debugging
+                            char debug_filename[512];
+                            snprintf(debug_filename, sizeof(debug_filename), "/tmp/debug_response_%s.txt", data_chunk.task_id);
+                            FILE *debug_file = fopen(debug_filename, "w");
+                            if (debug_file) {
+                                fprintf(debug_file, "Response size: %zd bytes\n", bytes);
+                                fprintf(debug_file, "Raw response:\n%s", response);
+                                fclose(debug_file);
+                                printf("[Employee] Raw response saved to: %s for debugging\n", debug_filename);
+                            }
                         }
+                        
+                        free(response);
                     } else {
                         printf("[Employee] Failed to receive response from node script\n");
                     }
@@ -215,41 +412,46 @@ static int send_result_to_employer(int sockfd, const result_info_t* result) {
         return -1;
     }
     
-    printf("[Employee] Sending result for task %s back to employer\n", result->task_id);
+    printf("[Employee] Sending detection result for task %s back to employer\n", result->task_id);
     
-    // 1. Send result metadata as JSON
-    cJSON *metadata = cJSON_CreateObject();
-    cJSON_AddStringToObject(metadata, "type", "task_result");
-    cJSON_AddStringToObject(metadata, "task_id", result->task_id);
-    
-    if (send_json(sockfd, metadata) != PROTOCOL_OK) {
-        printf("[Employee] Failed to send result metadata for task %s\n", result->task_id);
-        cJSON_Delete(metadata);
-        return -1;
-    }
-    cJSON_Delete(metadata);
-    
-    // 2. Send result file content
+    // Check file size first
     FILE *file = fopen(result->result_filepath, "rb");
     if (!file) {
         printf("[Employee] Failed to open result file %s\n", result->result_filepath);
         return -1;
     }
     
-    // Get file size
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
     
-    // Send file size first
+    printf("[Employee] Result file size: %ld bytes\n", file_size);
+    
+    // 1. Send result metadata as JSON
+    cJSON *metadata = cJSON_CreateObject();
+    cJSON_AddStringToObject(metadata, "type", "task_result");
+    cJSON_AddStringToObject(metadata, "task_id", result->task_id);
+    cJSON_AddNumberToObject(metadata, "result_size", file_size);
+    
+    if (send_json(sockfd, metadata) != PROTOCOL_OK) {
+        printf("[Employee] Failed to send result metadata for task %s\n", result->task_id);
+        cJSON_Delete(metadata);
+        fclose(file);
+        return -1;
+    }
+    printf("[Employee] Result metadata sent successfully\n");
+    cJSON_Delete(metadata);
+    
+    // 2. Send file size first
     uint32_t net_size = htonl((uint32_t)file_size);
     if (send(sockfd, &net_size, sizeof(net_size), 0) != sizeof(net_size)) {
         printf("[Employee] Failed to send result file size for task %s\n", result->task_id);
         fclose(file);
         return -1;
     }
+    printf("[Employee] File size sent: %ld bytes\n", file_size);
     
-    // Send file content in chunks
+    // 3. Send file content in chunks
     char buffer[4096];
     size_t total_sent = 0;
     while (total_sent < (size_t)file_size) {
@@ -269,11 +471,18 @@ static int send_result_to_employer(int sockfd, const result_info_t* result) {
         }
         
         total_sent += bytes_sent;
+        
+        // Progress indicator for large files
+        if (file_size > 10000 && total_sent % 10000 == 0) {
+            printf("[Employee] Progress: %zu/%ld bytes sent (%.1f%%)\n", 
+                   total_sent, file_size, (double)total_sent/file_size*100);
+        }
     }
     
     fclose(file);
     
-    printf("[Employee] Result transmission completed for task %s\n", result->task_id);
+    printf("[Employee] Detection result transmission completed for task %s (%zu bytes total)\n", 
+           result->task_id, total_sent);
     return 0;
 }
 
@@ -461,12 +670,12 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
         if (!is_result_queue_empty(&result_queue)) {
             result_info_t result_to_send;
             if (get_result_from_queue(&result_queue, &result_to_send) == 0) {
-                printf("[Employee] Dequeued result for task %s to send.\n", result_to_send.task_id);
+                printf("[Employee] Dequeued detection result for task %s to send to employer\n", result_to_send.task_id);
                 if (send_result_to_employer(employer_fd, &result_to_send) == 0) {
-                    printf("[Employee] Successfully sent result for task %s.\n", result_to_send.task_id);
+                    printf("[Employee] Successfully sent detection result for task %s to employer\n", result_to_send.task_id);
                     employee_status.tasks_completed++;
                 } else {
-                    printf("[Employee] Failed to send result for task %s. Re-queueing.\n", result_to_send.task_id);
+                    printf("[Employee] Failed to send detection result for task %s. Re-queueing for retry.\n", result_to_send.task_id);
                     add_result_to_queue(&result_queue, &result_to_send);
                     employee_status.tasks_failed++;
                 }
