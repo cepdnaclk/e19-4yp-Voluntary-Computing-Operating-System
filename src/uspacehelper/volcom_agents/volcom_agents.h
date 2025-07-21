@@ -149,6 +149,7 @@ void cleanup_task_buffer(struct task_buffer_s* buffer);
 int add_task_to_buffer(struct task_buffer_s* buffer, const received_task_t* task);
 int get_task_from_buffer(struct task_buffer_s* buffer, received_task_t* task);
 bool is_task_buffer_empty(const struct task_buffer_s* buffer);
+void print_task_buffer_status(const struct task_buffer_s* buffer, const char* context);
 
 int init_result_queue(result_queue_t* queue, int capacity);
 void cleanup_result_queue(result_queue_t* queue);

@@ -26,12 +26,33 @@ void cleanup_task_buffer(task_buffer_t* buffer) {
 int add_task_to_buffer(task_buffer_t* buffer, const received_task_t* task) {
     pthread_mutex_lock(&buffer->mutex);
     if (buffer->count >= buffer->capacity) {
-        pthread_mutex_unlock(&buffer->mutex);
-        return -1; // Buffer full
+        printf("[Task Buffer] Buffer full (%d/%d), dropping oldest task to make room\n", 
+               buffer->count, buffer->capacity);
+        // Drop the oldest task to make room (circular buffer behavior)
+        if (buffer->tasks[buffer->tail].data) {
+            free(buffer->tasks[buffer->tail].data);
+        }
+        buffer->tail = (buffer->tail + 1) % buffer->capacity;
+        buffer->count--;
     }
+    
+    // Deep copy the task data
     buffer->tasks[buffer->head] = *task;
+    if (task->data && task->data_size > 0) {
+        buffer->tasks[buffer->head].data = malloc(task->data_size);
+        if (buffer->tasks[buffer->head].data) {
+            memcpy(buffer->tasks[buffer->head].data, task->data, task->data_size);
+        } else {
+            printf("[Task Buffer] Failed to allocate memory for task data\n");
+            pthread_mutex_unlock(&buffer->mutex);
+            return -1;
+        }
+    }
+    
     buffer->head = (buffer->head + 1) % buffer->capacity;
     buffer->count++;
+    printf("[Task Buffer] Added task %s, buffer now %d/%d full\n", 
+           task->task_id, buffer->count, buffer->capacity);
     pthread_mutex_unlock(&buffer->mutex);
     return 0;
 }
@@ -43,8 +64,21 @@ int get_task_from_buffer(task_buffer_t* buffer, received_task_t* task) {
         return -1; // Buffer empty
     }
     *task = buffer->tasks[buffer->tail];
+    // Don't free the data here - it will be freed by the worker thread
     buffer->tail = (buffer->tail + 1) % buffer->capacity;
     buffer->count--;
+    printf("[Task Buffer] Retrieved task %s, buffer now %d/%d full\n", 
+           task->task_id, buffer->count, buffer->capacity);
+    
+    // Add validation logging
+    if (!task->data) {
+        printf("[Task Buffer] WARNING: Task %s has NULL data pointer!\n", task->task_id);
+    } else if (task->data_size == 0) {
+        printf("[Task Buffer] WARNING: Task %s has zero data size!\n", task->task_id);
+    } else {
+        printf("[Task Buffer] Task %s data validated: %zu bytes\n", task->task_id, task->data_size);
+    }
+    
     pthread_mutex_unlock(&buffer->mutex);
     return 0;
 }
@@ -54,6 +88,25 @@ bool is_task_buffer_empty(const task_buffer_t* buffer) {
     bool is_empty = (buffer->count == 0);
     pthread_mutex_unlock((pthread_mutex_t*)&buffer->mutex);
     return is_empty;
+}
+
+// Additional debugging function
+void print_task_buffer_status(const task_buffer_t* buffer, const char* context) {
+    pthread_mutex_lock((pthread_mutex_t*)&buffer->mutex);
+    printf("[Task Buffer Status] %s: %d/%d tasks (head=%d, tail=%d)\n", 
+           context, buffer->count, buffer->capacity, buffer->head, buffer->tail);
+    
+    // Print task IDs if buffer is not empty
+    if (buffer->count > 0) {
+        printf("[Task Buffer Contents] ");
+        int current = buffer->tail;
+        for (int i = 0; i < buffer->count; i++) {
+            printf("%s ", buffer->tasks[current].task_id);
+            current = (current + 1) % buffer->capacity;
+        }
+        printf("\n");
+    }
+    pthread_mutex_unlock((pthread_mutex_t*)&buffer->mutex);
 }
 
 // Result Queue Implementation

@@ -225,13 +225,62 @@ static void* worker_loop(void* arg) {
     (void)arg;
     
     while (employee_running) {
-        // Send buffered data chunks to node script when ready
+        // Process ALL available data chunks when ready
+        bool processed_any_task = false;
+        
         if (is_node_started && unix_socket_connected) {
             received_task_t data_chunk;
             
-            // Check for buffered data chunks to send to node
-            if (get_task_from_buffer(&data_chunk_buffer, &data_chunk) == 0) {
-                printf("[Employee] Sending data chunk %s to node script via Unix socket\n", data_chunk.task_id);
+            // Debug: Print buffer status before processing
+            if (!is_task_buffer_empty(&data_chunk_buffer)) {
+                print_task_buffer_status(&data_chunk_buffer, "Before processing");
+            }
+            
+            // Process multiple tasks in one iteration
+            while (get_task_from_buffer(&data_chunk_buffer, &data_chunk) == 0) {
+                processed_any_task = true;
+                printf("[Employee] Processing data chunk %s (buffer has %d remaining)\n", 
+                       data_chunk.task_id, data_chunk_buffer.count);
+                
+                // Check if Unix socket is still connected, reconnect if needed
+                if (!unix_socket_connected) {
+                    printf("[Employee] Unix socket disconnected, attempting to reconnect...\n");
+                    int retry_count = 0;
+                    const int max_retries = 5;
+                    
+                    while (retry_count < max_retries && !unix_socket_connected && employee_running) {
+                        // Reinitialize the client before connecting
+                        if (!unix_socket_client_init(&client_socket_config)) {
+                            printf("[Employee] Failed to reinitialize Unix socket client\n");
+                            retry_count++;
+                            sleep(1);
+                            continue;
+                        }
+                        
+                        if (unix_socket_client_connect()) {
+                            unix_socket_connected = true;
+                            printf("[Employee] Reconnected to Unix socket successfully!\n");
+                            break;
+                        } else {
+                            printf("[Employee] Reconnection attempt %d/%d failed\n", 
+                                   retry_count + 1, max_retries);
+                            // Clean up failed connection attempt
+                            unix_socket_client_cleanup();
+                            sleep(1);
+                            retry_count++;
+                        }
+                    }
+                    
+                    if (!unix_socket_connected) {
+                        printf("[Employee] Failed to reconnect to Unix socket, re-queuing task %s\n", data_chunk.task_id);
+                        // Re-add to buffer for retry
+                        if (add_task_to_buffer(&data_chunk_buffer, &data_chunk) != 0) {
+                            printf("[Employee] Failed to re-queue task %s - buffer full, dropping task\n", data_chunk.task_id);
+                            if (data_chunk.data) free(data_chunk.data);
+                        }
+                        break; // Exit processing loop
+                    }
+                }
                 
                 // Send the actual file data to the node script
                 if (unix_socket_client_send_message((char*)data_chunk.data)) {
@@ -307,7 +356,14 @@ static void* worker_loop(void* arg) {
                                 
                                 // Create result file with the complete JSON response
                                 char result_filename[512];
-                                snprintf(result_filename, sizeof(result_filename), "/tmp/node_result_%s.json", data_chunk.task_id);
+                                // Remove .json extension from task_id if present to avoid double extension
+                                char clean_task_id[256];
+                                strncpy(clean_task_id, data_chunk.task_id, sizeof(clean_task_id) - 1);
+                                char *json_ext = strstr(clean_task_id, ".json");
+                                if (json_ext) {
+                                    *json_ext = '\0'; // Remove .json extension
+                                }
+                                snprintf(result_filename, sizeof(result_filename), "/tmp/node_result_%s.json", clean_task_id);
                                 
                                 FILE *result_file = fopen(result_filename, "w");
                                 if (result_file) {
@@ -378,25 +434,57 @@ static void* worker_loop(void* arg) {
                         }
                         
                         free(response);
+                        
+                        // Node.js script closes connection after each response, mark as disconnected
+                        unix_socket_connected = false;
+                        printf("[Employee] Unix socket marked as disconnected (Node.js closes connection after response)\n");
+                        
+                        // Clean up the socket connection to allow reconnection
+                        unix_socket_client_cleanup();
+                        printf("[Employee] Unix socket client cleaned up for reconnection\n");
+                        
                     } else {
                         printf("[Employee] Failed to receive response from node script\n");
+                        // Mark socket as disconnected on receive failure
+                        unix_socket_connected = false;
+                        // Clean up the socket connection
+                        unix_socket_client_cleanup();
                     }
                 } else {
-                    printf("[Employee] Failed to send data chunk to node script, re-queuing\n");
-                    // Re-add to buffer for retry
-                    add_task_to_buffer(&data_chunk_buffer, &data_chunk);
+                    printf("[Employee] Failed to send data chunk %s to node script, re-queuing for retry\n", data_chunk.task_id);
+                    // Mark socket as disconnected on send failure
+                    unix_socket_connected = false;
+                    unix_socket_client_cleanup();
+                    
+                    // Re-add to buffer for retry (at the front to prioritize retry)
+                    if (add_task_to_buffer(&data_chunk_buffer, &data_chunk) != 0) {
+                        printf("[Employee] Failed to re-queue task %s - buffer full, dropping task\n", data_chunk.task_id);
+                        if (data_chunk.data) free(data_chunk.data);
+                    }
+                    // Break out of processing loop to avoid infinite retry
+                    break;
                 }
                 
-                // Clean up data chunk
+                // Clean up data chunk (moved here to ensure it's always cleaned up)
                 if (data_chunk.data) {
                     free(data_chunk.data);
                 }
             }
+            
+            // Debug: Print buffer status after processing
+            if (processed_any_task) {
+                print_task_buffer_status(&data_chunk_buffer, "After processing");
+            }
         }
         
-        // Sleep briefly if no tasks to process
-        if (!is_node_started || !unix_socket_connected || is_task_buffer_empty(&data_chunk_buffer)) {
-            usleep(100000); // 100ms
+        // Adaptive sleep based on activity
+        if (!is_node_started || !unix_socket_connected) {
+            usleep(100000); // 100ms when node not ready
+        } else if (!processed_any_task) {
+            usleep(10000); // 10ms when no tasks to process - much faster response
+        } else {
+            // No sleep when actively processing tasks - process as fast as possible
+            usleep(1000); // 1ms to prevent CPU spinning
         }
     }
     
@@ -602,6 +690,10 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
                 break;
             }
             char* msg_type = msg_type_item->valuestring;
+            
+            // Debug: Print buffer state before processing new message
+            printf("[Employee] Processing %s message (buffer: %d/%d tasks)\n", 
+                   msg_type, data_chunk_buffer.count, data_chunk_buffer.capacity);
             if (strcmp(msg_type, "initial_config") == 0) {
                 printf("[Employee] Receiving initial configuration...\n");
                 received_task_t config_task;
@@ -640,6 +732,7 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
                         // Add to data chunk buffer to wait for node to be ready
                         if (add_task_to_buffer(&data_chunk_buffer, &data_chunk) == 0) {
                             printf("[Employee] Data chunk %s buffered successfully\n", data_chunk.task_id);
+                            // Don't free data_chunk.data here - it's now owned by the buffer
                         } else {
                             printf("[Employee] Failed to buffer data chunk %s\n", data_chunk.task_id);
                             if (data_chunk.data) free(data_chunk.data);
@@ -649,6 +742,7 @@ static void handle_persistent_connection(int employer_fd, struct volcom_rcsmngr_
                         // Node is ready, add directly to processing buffer
                         if (add_task_to_buffer(&data_chunk_buffer, &data_chunk) == 0) {
                             printf("[Employee] Data chunk %s added to processing queue\n", data_chunk.task_id);
+                            // Don't free data_chunk.data here - it's now owned by the buffer
                         } else {
                             printf("[Employee] Failed to add data chunk %s to processing queue\n", data_chunk.task_id);
                             if (data_chunk.data) free(data_chunk.data);
@@ -806,8 +900,8 @@ int run_employee_mode(struct volcom_rcsmngr_s *manager) {
         return -1;
     }
 
-    // Initialize data chunk buffer
-    if (init_task_buffer(&data_chunk_buffer, 50) != 0) {
+    // Initialize data chunk buffer with larger capacity for multiple data points
+    if (init_task_buffer(&data_chunk_buffer, 100) != 0) {
         fprintf(stderr, "Failed to initialize data chunk buffer\n");
         return -1;
     }
