@@ -1,0 +1,186 @@
+# Voluntary Computing Operating System - Refactored Makefile
+# Compiler and flags
+CC = gcc
+CFLAGS = -Wall -Wextra -pthread -std=c99
+INCLUDES = -I./volcom_agents \
+           -I./volcom_net \
+           -I./volcom_scheduler \
+           -I./volcom_utils \
+           -I./volcom_sysinfo \
+           -I./volcom_rcsmngr \
+           -I/usr/include/cjson
+
+# Linker flags
+LDFLAGS = -pthread -lm -lcjson
+
+# Libraries
+LIBS = -lcjson -lm -lpthread
+
+# Source directories
+AGENTS_SRC_DIR = volcom_agents
+NET_SRC_DIR = volcom_net
+SCHEDULER_SRC_DIR = volcom_scheduler
+UTILS_SRC_DIR = volcom_utils
+SYSINFO_SRC_DIR = volcom_sysinfo
+RCSMNGR_SRC_DIR = volcom_rcsmngr
+
+# Source files
+AGENT_SRCS = $(AGENTS_SRC_DIR)/employer/volcom_employer.c \
+              $(AGENTS_SRC_DIR)/employee/volcom_employee.c \
+              $(AGENTS_SRC_DIR)/task_management.c 
+# 			  \
+#               $(AGENTS_SRC_DIR)/result_queue.c
+
+NET_SRCS = $(NET_SRC_DIR)/protocol.c
+
+SCHED_SRCS = $(SCHEDULER_SRC_DIR)/task_scheduler.c
+
+UTIL_SRCS = $(UTILS_SRC_DIR)/net_utils.c
+
+SYSINFO_SRCS = $(SYSINFO_SRC_DIR)/volcom_sysinfo.c
+
+RCSMNGR_SRCS = $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.c
+
+# All source files
+SRCS = volcom_main.c \
+       $(AGENT_SRCS) \
+       $(NET_SRCS) \
+       $(SCHED_SRCS) \
+       $(UTIL_SRCS) \
+       $(SYSINFO_SRCS) \
+       $(RCSMNGR_SRCS)
+
+# Object files
+OBJS = $(SRCS:.c=.o)
+
+# Target executable
+TARGET = volcom_main
+
+# Default target
+all: $(TARGET)
+
+# Build target
+$(TARGET): $(OBJS)
+	@echo "Linking $(TARGET)..."
+	$(CC) $(CFLAGS) $(OBJS) $(LIBS) -o $(TARGET)
+	@echo "Build complete: $(TARGET)"
+
+# Compile source files
+%.o: %.c
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning build artifacts..."
+	find . -name "*.o" -type f -delete
+	rm -f $(TARGET)
+	@echo "Clean complete"
+
+# Install dependencies (Ubuntu/Debian)
+install-deps:
+	@echo "Installing dependencies..."
+	sudo apt-get update
+	sudo apt-get install -y build-essential libcjson-dev
+
+# Create directories for organization
+create-dirs:
+	@echo "Creating directory structure..."
+	mkdir -p $(AGENTS_SRC_DIR)
+	mkdir -p $(NET_SRC_DIR)
+	mkdir -p $(SCHEDULER_SRC_DIR)
+	mkdir -p $(UTILS_SRC_DIR)
+
+# Debug build
+debug: CFLAGS += -g -DDEBUG -O0
+debug: $(TARGET)
+
+# Release build
+release: CFLAGS += -O2 -DNDEBUG
+release: $(TARGET)
+
+# Print configuration
+info:
+	@echo "=== Build Configuration ==="
+	@echo "CC: $(CC)"
+	@echo "CFLAGS: $(CFLAGS)"
+	@echo "INCLUDES: $(INCLUDES)"
+	@echo "LIBS: $(LIBS)"
+	@echo "TARGET: $(TARGET)"
+	@echo "=========================="
+
+# Run the program
+run: $(TARGET)
+	./$(TARGET)
+
+# Test individual modules (placeholders)
+test-agents:
+	@echo "Testing agents module..."
+	$(CC) $(CFLAGS) $(INCLUDES) -DTEST_AGENTS $(AGENT_SRCS) $(UTILS_SRC) $(SYSINFO_SRC) $(LIBS) -o test_agents
+	./test_agents
+
+test-net:
+	@echo "Testing network module..."
+	$(CC) $(CFLAGS) $(INCLUDES) -DTEST_NET $(NET_SRC) $(LIBS) -o test_net
+	./test_net
+
+test-scheduler:
+	@echo "Testing scheduler module..."
+	$(CC) $(CFLAGS) $(INCLUDES) -DTEST_SCHEDULER $(SCHEDULER_SRC) $(NET_SRC) $(LIBS) -o test_scheduler
+	./test_scheduler
+
+# Help
+help:
+	@echo "Available targets:"
+	@echo "  all          - Build the main executable (default)"
+	@echo "  clean        - Remove build artifacts"
+	@echo "  debug        - Build with debug symbols"
+	@echo "  release      - Build optimized release version"
+	@echo "  install-deps - Install required dependencies"
+	@echo "  create-dirs  - Create directory structure"
+	@echo "  info         - Show build configuration"
+	@echo "  run          - Build and run the program"
+	@echo "  test-*       - Test individual modules"
+	@echo "  help         - Show this help message"
+
+# Phony targets
+.PHONY: all clean debug release install-deps create-dirs info run help test-agents test-net test-scheduler
+
+# Dependencies (simple dependency tracking)
+volcom_main.o: volcom_main.c volcom_agents/volcom_agents.h volcom_utils/volcom_utils.h
+
+$(AGENTS_SRC_DIR)/employer_mode.o: $(AGENTS_SRC_DIR)/employer/volcom_employer.c \
+                                   $(AGENTS_SRC_DIR)/volcom_agents.h \
+                                   $(UTILS_SRC_DIR)/volcom_utils.h \
+                                   $(NET_SRC_DIR)/volcom_net.h \
+                                   $(SCHEDULER_SRC_DIR)/volcom_scheduler.h
+
+$(AGENTS_SRC_DIR)/employee_mode.o: $(AGENTS_SRC_DIR)/employee/volcom_employee.c \
+                                   $(AGENTS_SRC_DIR)/volcom_agents.h \
+                                   $(UTILS_SRC_DIR)/volcom_utils.h \
+                                   $(NET_SRC_DIR)/volcom_net.h \
+                                   $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.h
+
+$(AGENTS_SRC_DIR)/task_management.o: $(AGENTS_SRC_DIR)/task_management.c \
+                                 $(AGENTS_SRC_DIR)/volcom_agents.h
+
+# $(AGENTS_SRC_DIR)/result_queue.o: $(AGENTS_SRC_DIR)/result_queue.c \
+#                                    $(AGENTS_SRC_DIR)/volcom_agents.h
+
+$(NET_SRC_DIR)/protocol.o: $(NET_SRC_DIR)/protocol.c \
+                           $(NET_SRC_DIR)/volcom_net.h
+
+$(SCHEDULER_SRC_DIR)/task_scheduler.o: $(SCHEDULER_SRC_DIR)/task_scheduler.c \
+                                       $(SCHEDULER_SRC_DIR)/volcom_scheduler.h \
+                                       $(NET_SRC_DIR)/volcom_net.h
+
+$(UTILS_SRC_DIR)/net_utils.o: $(UTILS_SRC_DIR)/net_utils.c \
+                               $(UTILS_SRC_DIR)/volcom_utils.h
+
+$(SYSINFO_SRC_DIR)/volcom_sysinfo.o: $(SYSINFO_SRC_DIR)/volcom_sysinfo.c \
+                                      $(SYSINFO_SRC_DIR)/volcom_sysinfo.h
+
+$(RCSMNGR_SRC_DIR)/volcom_rcsmngr.o: $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.c \
+                                      $(RCSMNGR_SRC_DIR)/volcom_rcsmngr.h \
+                                      $(SYSINFO_SRC_DIR)/volcom_sysinfo.h
+
